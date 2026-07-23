@@ -128,7 +128,14 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
     # ── ¿Ya pasó por Zamora? ─────────────────────────────────────────────────
     if cod_est_ant == ZAMORA_CODE:
         _record_passage(scheduled, live, now_local)
-        _mark_done(cod, now_local)
+
+        from datetime import timedelta
+        h, m = map(int, scheduled["hora_paso_zamora"].split(":"))
+        hora_llegada_real = (
+            datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
+        ).strftime("%H:%M")
+
+        _mark_done(cod, now_local, hora_llegada_real=hora_llegada_real)
         return True
 
     # ── Todavía no ha llegado: actualizar estado en DynamoDB ─────────────────
@@ -297,15 +304,20 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
     })
 
 
-def _mark_done(cod: str, now_local: datetime):
+def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = None):
     """Marca el tren como completamente procesado para hoy."""
-    import time
-
-    state_table.update_item(
-        Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
-        UpdateExpression="SET done = :done",
-        ExpressionAttributeValues={":done": True},
-    )
+    if hora_llegada_real is not None:
+        state_table.update_item(
+            Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
+            UpdateExpression="SET done = :done, hora_llegada_real = :hora_real",
+            ExpressionAttributeValues={":done": True, ":hora_real": hora_llegada_real},
+        )
+    else:
+        state_table.update_item(
+            Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
+            UpdateExpression="SET done = :done",
+            ExpressionAttributeValues={":done": True},
+        )
 
 
 def _increment_retry_count(cod: str, now_local: datetime):
