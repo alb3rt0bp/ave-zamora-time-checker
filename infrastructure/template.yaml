@@ -1,0 +1,390 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Zamora Train Observability
+  Data Lake de puntualidad de trenes Alvia/Intercity en la estación de Zamora.
+  Arquitectura: EventBridge Scheduler → Lambda (cada 5 min) → S3 Data Lake + DynamoDB.
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PARÁMETROS
+# ══════════════════════════════════════════════════════════════════════════════
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+    AllowedValues: [dev, staging, prod]
+    Description: Entorno de despliegue
+
+  AwsRegion:
+    Type: String
+    Default: eu-south-2
+    Description: >
+      Región AWS del despliegue. Debe coincidir con la región donde se
+      despliega el stack (usada en los widgets del Dashboard y la URL).
+
+  ZamoraStationCode:
+    Type: String
+    Default: "30200"
+    Description: >
+      Código de estación Zamora en el sistema Renfe.
+      Verificar contra codEstAnt en flotaLD.json.
+
+  ChamartinStationCode:
+    Type: String
+    Default: "17000"
+    Description: >
+      Código de estación Madrid Chamartín en el sistema Renfe.
+      Usado para detectar la llegada de los trenes con sentido Madrid.
+      Verificar contra codEstAnt en flotaLD.json.
+
+  PollingWindowMinutes:
+    Type: Number
+    Default: 30
+    MinValue: 10
+    MaxValue: 60
+    Description: Minutos antes/después de la hora programada para monitorizar el tren
+
+  AlertEmailAddress:
+    Type: String
+    Default: ""
+    Description: Email para alertas de retrasos (opcional)
+
+  GlueDatabaseName:
+    Type: String
+    Default: zamora_trains_db
+    Description: Nombre de la base de datos en AWS Glue Data Catalog
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONDICIONES
+# ══════════════════════════════════════════════════════════════════════════════
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmailAddress, ""]]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GLOBALS SAM
+# ══════════════════════════════════════════════════════════════════════════════
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 60
+    MemorySize: 256
+    Architectures: [arm64]          # Graviton2: ~20% más barato que x86_64
+    Environment:
+      Variables:
+        ENVIRONMENT:          !Ref Environment
+        ZAMORA_STATION_CODE:  !Ref ZamoraStationCode
+        CHAMARTIN_STATION_CODE: !Ref ChamartinStationCode
+        DATALAKE_S3_BUCKET:   !Ref DatalakeBucket
+        DYNAMODB_STATE_TABLE: !Ref TrainStateTable
+        LOG_LEVEL:            INFO
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RECURSOS
+# ══════════════════════════════════════════════════════════════════════════════
+Resources:
+
+  # ── S3: Data Lake ──────────────────────────────────────────────────────────
+  DatalakeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "zamora-trains-datalake-${Environment}-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 90
+                StorageClass: GLACIER_IR
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true   # Para poder reaccionar a nuevos objetos si hace falta
+
+  # ── DynamoDB: Estado transitorio de trenes ─────────────────────────────────
+  TrainStateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "zamora-train-state-${Environment}"
+      BillingMode: PAY_PER_REQUEST   # On-demand: tráfico muy bajo (< 300 escrituras/día)
+      TableClass: STANDARD           # DynamoDB Standard (no DynamoDB Standard-IA)
+      AttributeDefinitions:
+        - AttributeName: pk          # "{cod_comercial}#{fecha}"  e.g. "04154#2024-11-15"
+          AttributeType: S
+        - AttributeName: sk          # "TRACKING"
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true                # Los registros expiran automáticamente tras 24h
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ── Lambda: Train Tracker ──────────────────────────────────────────────────
+  TrainTrackerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-train-tracker-${Environment}"
+      CodeUri: ../lambdas/train_tracker/
+      Handler: handler.lambda_handler
+      Description: >
+        Ejecutada cada 5 minutos. Consulta flotaLD.json de Renfe y registra
+        los pasos por Zamora en el Data Lake S3.
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref DatalakeBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrainStateTable
+        - CloudWatchPutMetricPolicy: {}
+      Events:
+        # Cron no admite un patrón de minutos distinto por hora en una sola
+        # expresión, así que el tramo 07:00–23:30 se cubre con dos schedules:
+        # uno para las horas completas y otro para el tramo parcial final.
+        # ScheduleExpressionTimezone=Europe/Madrid gestiona el cambio CET/CEST
+        # automáticamente (no hace falta calcular el offset a mano).
+        ScheduleEvery5MinMorningToNight:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub "zamora-train-tracker-poll-morning-${Environment}"
+            ScheduleExpression: "cron(0/5 7-22 * * ? *)"
+            ScheduleExpressionTimezone: "Europe/Madrid"
+            FlexibleTimeWindow:
+              Mode: "OFF"            # Sin flexibilidad: queremos exactitud temporal
+            Description: "Polling cada 5 minutos entre las 07:00 y las 22:55 (hora de Madrid)"
+        ScheduleEvery5MinLastHour:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub "zamora-train-tracker-poll-lasthour-${Environment}"
+            ScheduleExpression: "cron(0,5,10,15,20,25,30 23 * * ? *)"
+            ScheduleExpressionTimezone: "Europe/Madrid"
+            FlexibleTimeWindow:
+              Mode: "OFF"
+            Description: "Polling cada 5 minutos entre las 23:00 y las 23:30 (hora de Madrid)"
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  # ── Lambda: métricas de retraso para CloudWatch ────────────────────────────
+  DelayMetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-delay-metrics-${Environment}"
+      CodeUri: ../lambdas/delay_metrics/
+      Handler: handler.lambda_handler
+      Description: >
+        Disparada por S3 Event Notification cuando se escribe un nuevo objeto
+        en el Data Lake. Publica métricas de retraso en CloudWatch.
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref DatalakeBucket
+        - CloudWatchPutMetricPolicy: {}
+      Events:
+        S3NewObject:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source: ["aws.s3"]
+              detail-type: ["Object Created"]
+              detail:
+                bucket:
+                  name: [!Ref DatalakeBucket]
+                object:
+                  key:
+                    - prefix: "zamora-trains/"
+
+  # ── CloudWatch: Alarma de retrasos grandes ──────────────────────────────────
+  HighDelayAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    Properties:
+      AlarmName: !Sub "ZamoraTrain-HighDelay-${Environment}"
+      AlarmDescription: "Tren con retraso > 30 minutos en Zamora"
+      Namespace: ZamoraTrains
+      MetricName: TrainDelayMinutes
+      Statistic: Maximum
+      Period: 300                    # 5 minutos
+      EvaluationPeriods: 1
+      Threshold: 30
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlertEmail
+    Properties:
+      TopicName: !Sub "zamora-trains-alerts-${Environment}"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmailAddress
+
+  # ── AWS Glue: Data Catalog ─────────────────────────────────────────────────
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: !Ref GlueDatabaseName
+        Description: "Data Lake de puntualidad de trenes en Zamora"
+
+  GlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: !Sub "zamora-trains-crawler-${Environment}"
+      Role: !GetAtt GlueCrawlerRole.Arn
+      DatabaseName: !Ref GlueDatabaseName
+      Description: "Descubre particiones nuevas en el Data Lake S3"
+      Targets:
+        S3Targets:
+          - Path: !Sub "s3://${DatalakeBucket}/zamora-trains/"
+      SchemaChangePolicy:
+        # CRAWL_NEW_FOLDERS_ONLY exige que ambos comportamientos sean LOG:
+        # el crawler solo añade particiones nuevas, no reescribe ni borra las ya catalogadas.
+        UpdateBehavior: LOG
+        DeleteBehavior: LOG
+      RecrawlPolicy:
+        RecrawlBehavior: CRAWL_NEW_FOLDERS_ONLY
+      Schedule:
+        # Ejecutar el Crawler una vez al día a las 3:00 AM
+        ScheduleExpression: "cron(0 3 * * ? *)"
+
+  GlueCrawlerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "ZamoraGlueCrawlerRole-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+      Policies:
+        - PolicyName: S3ReadDatalake
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt DatalakeBucket.Arn
+                  - !Sub "${DatalakeBucket.Arn}/*"
+
+  # ── Athena: Workgroup ─────────────────────────────────────────────────────
+  AthenaWorkgroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: !Sub "zamora-trains-${Environment}"
+      Description: "Queries sobre el Data Lake de trenes Zamora"
+      WorkGroupConfiguration:
+        ResultConfiguration:
+          OutputLocation: !Sub "s3://${DatalakeBucket}/athena-results/"
+        EnforceWorkGroupConfiguration: true
+        PublishCloudWatchMetricsEnabled: true
+        BytesScannedCutoffPerQuery: 1073741824   # 1 GB máximo por query
+
+  # ── CloudWatch Dashboard ──────────────────────────────────────────────────
+  TrainDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "ZamoraTrains-${Environment}"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "title": "Retraso medio diario (minutos)",
+                "metrics": [
+                  ["ZamoraTrains", "TrainDelayMinutes", "Sentido", "Madrid"],
+                  ["ZamoraTrains", "TrainDelayMinutes", "Sentido", "Galicia"]
+                ],
+                "stat": "Average",
+                "period": 86400,
+                "view": "timeSeries",
+                "region": "${AwsRegion}"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "title": "Trenes con retraso > 0 (por día)",
+                "metrics": [
+                  ["ZamoraTrains", "TrainsWithDelay"]
+                ],
+                "stat": "Sum",
+                "period": 86400,
+                "view": "timeSeries",
+                "region": "${AwsRegion}"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "title": "Ejecuciones Lambda",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "zamora-train-tracker-${Environment}"],
+                  ["AWS/Lambda", "Errors",      "FunctionName", "zamora-train-tracker-${Environment}"]
+                ],
+                "stat": "Sum",
+                "period": 300,
+                "region": "${AwsRegion}"
+              }
+            }
+          ]
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OUTPUTS
+# ══════════════════════════════════════════════════════════════════════════════
+Outputs:
+  DatalakeBucketName:
+    Description: "Nombre del bucket S3 del Data Lake"
+    Value: !Ref DatalakeBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-DatalakeBucket"
+
+  DynamoDBTableName:
+    Description: "Tabla DynamoDB de estado de trenes"
+    Value: !Ref TrainStateTable
+
+  TrainTrackerFunctionArn:
+    Description: "ARN de la Lambda principal"
+    Value: !GetAtt TrainTrackerFunction.Arn
+
+  AthenaWorkgroupName:
+    Description: "Workgroup Athena para queries"
+    Value: !Ref AthenaWorkgroup
+
+  GlueDatabaseName:
+    Description: "Base de datos Glue Data Catalog"
+    Value: !Ref GlueDatabase
+
+  DashboardURL:
+    Description: "URL del CloudWatch Dashboard"
+    Value: !Sub "https://${AwsRegion}.console.aws.amazon.com/cloudwatch/home#dashboards:name=ZamoraTrains-${Environment}"

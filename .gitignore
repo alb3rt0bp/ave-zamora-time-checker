@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+# AWS SAM
+.aws-sam
+
+# Claude
+.claude
+CLAUDE.md
