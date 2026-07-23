@@ -122,8 +122,6 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
 
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
-    lat         = live.get("lat")
-    lon         = live.get("lon")
 
     # ── ¿Ya pasó por Zamora? ─────────────────────────────────────────────────
     if cod_est_ant == ZAMORA_CODE:
@@ -139,7 +137,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
         return True
 
     # ── Todavía no ha llegado: actualizar estado en DynamoDB ─────────────────
-    _update_state(cod, scheduled, ult_retraso, cod_est_ant, lat, lon, now_local)
+    _update_state(cod, scheduled, ult_retraso, cod_est_ant, now_local)
     logger.info(
         "Tren %s aún no en Zamora (última est: %s, retraso: %d min)",
         cod, cod_est_ant, ult_retraso
@@ -222,8 +220,6 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
 
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
-    lat         = live.get("lat")
-    lon         = live.get("lon")
 
     # ── Vía 2: última estación == Chamartín → llegó a Madrid ─────────────────
     if cod_est_ant == CHAMARTIN_CODE:
@@ -233,7 +229,7 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
         return True
 
     # ── Aún en ruta hacia Madrid: actualizar estado en DynamoDB ──────────────
-    _update_state(cod, scheduled, ult_retraso, cod_est_ant, lat, lon, now_local)
+    _update_state(cod, scheduled, ult_retraso, cod_est_ant, now_local)
     logger.info(
         "Tren %s (Madrid) aún en ruta (última est: %s, retraso: %d min)",
         cod, cod_est_ant, ult_retraso
@@ -277,7 +273,7 @@ def _record_passage(scheduled: dict, live: dict, now_local: datetime):
 
 
 def _update_state(cod: str, scheduled: dict, retraso: int,
-                  cod_est_ant: str, lat, lon, now_local: datetime):
+                  cod_est_ant: str, now_local: datetime):
     """Persiste el estado transitorio del tren en DynamoDB."""
     import time
     from datetime import timedelta
