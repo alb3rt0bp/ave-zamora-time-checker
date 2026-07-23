@@ -162,6 +162,39 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
     # ── Vía 1: desaparecido de la flota tras haber sido visto → llegó a Madrid ─
     if live is None:
         if seen_before:
+            from datetime import timedelta
+            h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
+            hora_llegada_programada = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+
+            # Algunos trenes desaparecen de la flota antes de llegar realmente
+            # a destino (hueco de cobertura GPS, cambio de composición, etc.).
+            # Para evitar falsos positivos, solo se acepta la desaparición como
+            # señal de llegada si ocurre a partir de 5 min antes de la hora
+            # programada; si es más pronto, se reintenta en la próxima ejecución,
+            # con un límite de reintentos = floor(ult_retraso / 5) (mínimo 1)
+            # antes de darlo por llegado igualmente con los últimos datos conocidos.
+            if now_local < hora_llegada_programada - timedelta(minutes=5):
+                ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
+                max_reintentos = max(1, ult_retraso_conocido // 5)
+                reintentos = int(state.get("retries", 0) or 0)
+
+                if reintentos < max_reintentos:
+                    _increment_retry_count(cod, now_local)
+                    logger.warning(
+                        "Tren %s (Madrid) desaparecido de la flota demasiado pronto "
+                        "(hora actual: %s, hora programada: %s) → reintento %d/%d, "
+                        "no se da por llegado todavía",
+                        cod, now_local.strftime("%H:%M"), scheduled["hora_llegada_destino"],
+                        reintentos + 1, max_reintentos
+                    )
+                    return False
+
+                logger.warning(
+                    "Tren %s (Madrid) agotó los %d reintentos tras desaparecer "
+                    "antes de hora → se da por llegado con los últimos datos conocidos",
+                    cod, max_reintentos
+                )
+
             # No hay datos en vivo; usamos el último estado conocido.
             last_known = {
                 "ultRetraso": state.get("ult_retraso", 0),
@@ -272,4 +305,13 @@ def _mark_done(cod: str, now_local: datetime):
         Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
         UpdateExpression="SET done = :done",
         ExpressionAttributeValues={":done": True},
+    )
+
+
+def _increment_retry_count(cod: str, now_local: datetime):
+    """Incrementa el contador de reintentos por desaparición prematura de la flota."""
+    state_table.update_item(
+        Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
+        UpdateExpression="ADD retries :one",
+        ExpressionAttributeValues={":one": 1},
     )
