@@ -78,8 +78,8 @@ SELECT
     fecha_hora_evento,
     cod_comercial,
     sentido,
-    hora_programada_zamora,
-    hora_real_zamora,
+    hora_programada,
+    hora_real,
     minutos_retraso
 FROM zamora_trains
 WHERE minutos_retraso > 30

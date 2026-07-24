@@ -125,7 +125,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
 
     # ── ¿Ya pasó por Zamora? ─────────────────────────────────────────────────
     if cod_est_ant == ZAMORA_CODE:
-        _record_passage(scheduled, live, now_local)
+        _record_passage(scheduled, live, now_local, capturado_en_zamora=True)
 
         from datetime import timedelta
         h, m = map(int, scheduled["hora_paso_zamora"].split(":"))
@@ -223,7 +223,7 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
                 "ultRetraso": state.get("ult_retraso", 0),
                 "codEstAnt":  state.get("cod_est_ant"),
             }
-            _record_passage(scheduled, last_known, now_local)
+            _record_passage(scheduled, last_known, now_local, capturado_en_zamora=True)
             _mark_done(cod, now_local)
             logger.info(
                 "Tren %s (Madrid) desaparecido de la flota tras ser visto → "
@@ -241,7 +241,11 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
 
     # ── Vía 2: última estación == Chamartín → llegó a Madrid ─────────────────
     if cod_est_ant == CHAMARTIN_CODE:
-        _record_passage(scheduled, live, now_local)
+        # No hay guardia previa de capturado_en_zamora en esta vía: se refleja
+        # el valor conocido tal cual, para poder auditar en Athena los casos
+        # en los que un tren llega a Chamartín sin haber pasado por Zamora.
+        capturado_en_zamora = bool(state and state.get("capturado_en_zamora"))
+        _record_passage(scheduled, live, now_local, capturado_en_zamora=capturado_en_zamora)
         _mark_done(cod, now_local)
         logger.info("Tren %s ha llegado a Chamartín (codEstAnt=%s)", cod, cod_est_ant)
         return True
@@ -266,7 +270,7 @@ def _get_state(cod: str, now_local: datetime) -> dict | None:
     return resp.get("Item")
 
 
-def _record_passage(scheduled: dict, live: dict, now_local: datetime):
+def _record_passage(scheduled: dict, live: dict, now_local: datetime, capturado_en_zamora: bool = False):
     """Construye el registro del datalake y lo escribe en S3."""
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
     hora_programada = scheduled["hora_llegada_destino"]  # "HH:MM"
@@ -286,19 +290,25 @@ def _record_passage(scheduled: dict, live: dict, now_local: datetime):
         "minutos_retraso": ult_retraso,
         "cod_est_ant": live.get("codEstAnt"),
         "cod_est_sig": live.get('codEstSig'),
-        "ult_retraso_renfe": ult_retraso
+        "ult_retraso_renfe": ult_retraso,
+        "capturado_en_zamora": capturado_en_zamora,
     }
 
     writer.write(record, now_local)
     logger.info("✅ Grabado: %s retraso=%d min", record["event_id"], ult_retraso)
 
 
+def _end_of_day_ttl(now_local: datetime) -> int:
+    """TTL en epoch seconds correspondiente a las 23:59:59 del día local (Europe/Madrid)."""
+    end_of_day = now_local.replace(hour=23, minute=59, second=59, microsecond=0)
+    return int(end_of_day.timestamp())
+
+
 def _update_state(cod: str, scheduled: dict, retraso: int,
                   cod_est_ant: str, now_local: datetime, capturado_en_zamora: bool = False):
     """Persiste el estado transitorio del tren en DynamoDB."""
-    import time
     from datetime import timedelta
-    ttl = int(time.time()) + 86400  # expira en 24h
+    ttl = _end_of_day_ttl(now_local)  # expira a las 23:59:59 del mismo día
 
     h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
     hora_llegada_real = (
@@ -325,8 +335,12 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
 def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = None,
                capturado_en_zamora: bool | None = None):
     """Marca el tren como completamente procesado para hoy."""
-    set_parts = ["done = :done"]
-    values = {":done": True}
+    # "ttl" es palabra reservada en DynamoDB → hay que usar un alias (#ttl).
+    # Se fija siempre aquí, ya que este item puede no haber pasado nunca por
+    # _update_state (p. ej. llegada detectada en el primer poll del tren).
+    set_parts = ["done = :done", "#ttl = :ttl"]
+    values = {":done": True, ":ttl": _end_of_day_ttl(now_local)}
+    names = {"#ttl": "ttl"}
 
     if hora_llegada_real is not None:
         set_parts.append("hora_llegada_real = :hora_real")
@@ -339,6 +353,7 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = No
     state_table.update_item(
         Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
         UpdateExpression="SET " + ", ".join(set_parts),
+        ExpressionAttributeNames=names,
         ExpressionAttributeValues=values,
     )
 
