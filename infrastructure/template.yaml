@@ -247,52 +247,77 @@ Resources:
         Name: !Ref GlueDatabaseName
         Description: "Data Lake de puntualidad de trenes en Zamora"
 
-  GlueCrawler:
-    Type: AWS::Glue::Crawler
+  # Tabla definida a mano (sin Crawler): las columnas deben coincidir
+  # exactamente con las claves del JSON que escribe _record_passage() en
+  # handler.py. Las particiones (year/month/day) se resuelven mediante
+  # Partition Projection, así que tampoco hace falta ALTER TABLE ADD PARTITION
+  # ni ejecutar nada tras cada despliegue para que Athena vea los datos nuevos.
+  TrainsTable:
+    Type: AWS::Glue::Table
+    DependsOn: GlueDatabase
     Properties:
-      Name: !Sub "zamora-trains-crawler-${Environment}"
-      Role: !GetAtt GlueCrawlerRole.Arn
+      CatalogId: !Ref AWS::AccountId
       DatabaseName: !Ref GlueDatabaseName
-      Description: "Descubre particiones nuevas en el Data Lake S3"
-      Targets:
-        S3Targets:
-          - Path: !Sub "s3://${DatalakeBucket}/zamora-trains/"
-      SchemaChangePolicy:
-        # CRAWL_NEW_FOLDERS_ONLY exige que ambos comportamientos sean LOG:
-        # el crawler solo añade particiones nuevas, no reescribe ni borra las ya catalogadas.
-        UpdateBehavior: LOG
-        DeleteBehavior: LOG
-      RecrawlPolicy:
-        RecrawlBehavior: CRAWL_NEW_FOLDERS_ONLY
-      Schedule:
-        # Ejecutar el Crawler una vez al día a las 3:00 AM
-        ScheduleExpression: "cron(0 3 * * ? *)"
-
-  GlueCrawlerRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub "ZamoraGlueCrawlerRole-${Environment}"
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: glue.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
-      Policies:
-        - PolicyName: S3ReadDatalake
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !GetAtt DatalakeBucket.Arn
-                  - !Sub "${DatalakeBucket.Arn}/*"
+      TableInput:
+        Name: zamora_trains
+        Description: "Eventos de paso/llegada de trenes por Zamora (Madrid/Galicia)"
+        TableType: EXTERNAL_TABLE
+        Parameters:
+          classification: json
+          "projection.enabled": "true"
+          "projection.year.type": "integer"
+          "projection.year.range": "2024,2035"
+          "projection.month.type": "integer"
+          "projection.month.range": "1,12"
+          "projection.month.digits": "2"
+          "projection.day.type": "integer"
+          "projection.day.range": "1,31"
+          "projection.day.digits": "2"
+          "storage.location.template": !Sub "s3://${DatalakeBucket}/zamora-trains/year=${!year}/month=${!month}/day=${!day}/"
+        PartitionKeys:
+          - Name: year
+            Type: string
+          - Name: month
+            Type: string
+          - Name: day
+            Type: string
+        StorageDescriptor:
+          Location: !Sub "s3://${DatalakeBucket}/zamora-trains/"
+          InputFormat: org.apache.hadoop.mapred.TextInputFormat
+          OutputFormat: org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat
+          SerdeInfo:
+            SerializationLibrary: org.openx.data.jsonserde.JsonSerDe
+            Parameters:
+              "ignore.malformed.json": "true"
+          Columns:
+            # Debe reflejar exactamente el dict `record` de _record_passage()
+            # en lambdas/train_tracker/handler.py.
+            - Name: event_id
+              Type: string
+            - Name: cod_comercial
+              Type: string
+            - Name: sentido
+              Type: string
+            - Name: tipo_dia
+              Type: string
+            - Name: dia_semana
+              Type: string
+            - Name: fecha_hora_evento
+              Type: string
+            - Name: hora_programada
+              Type: string
+            - Name: hora_real
+              Type: string
+            - Name: minutos_retraso
+              Type: int
+            - Name: cod_est_ant
+              Type: string
+            - Name: cod_est_sig
+              Type: string
+            - Name: ult_retraso_renfe
+              Type: int
+            - Name: capturado_en_zamora
+              Type: boolean
 
   # ── Athena: Workgroup ─────────────────────────────────────────────────────
   AthenaWorkgroup:

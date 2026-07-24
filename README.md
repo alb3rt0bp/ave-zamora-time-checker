@@ -65,8 +65,8 @@ JSON files              →    S3 Data Lake + Glue + Athena
 │                          ┌───────────────┴────────┐                       │
 │                          ▼                        ▼                        │
 │                 ┌────────────────┐      ┌──────────────────┐              │
-│                 │  Glue Crawler  │─────▶│     Athena       │              │
-│                 │  (diario 3AM)  │      │  (1 GB/query cap)│              │
+│                 │   Glue Table   │─────▶│     Athena       │              │
+│                 │ (sin Crawler)  │      │  (1 GB/query cap)│              │
 │                 └────────────────┘      └──────────────────┘              │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
@@ -195,14 +195,19 @@ Particionado Hive por `year / month / day`. Cada evento es un JSON de una línea
 - **S3 Data Lake** — versionado, cifrado (AES256), acceso público bloqueado y
   lifecycle (→ Standard-IA a 30 días, → Glacier-IR a 90). EventBridge habilitado
   para notificar nuevos objetos.
-- **DynamoDB `zamora-train-state`** — on-demand (PAY_PER_REQUEST), TTL 24h,
+- **DynamoDB `zamora-train-state`** — on-demand (PAY_PER_REQUEST), TTL hasta las
+  23:59:59 hora local (la tabla arranca vacía cada día),
   Point-in-Time Recovery. Clave `pk = {cod}#{fecha}`, `sk = TRACKING`.
 - **Lambda `train-tracker`** — arm64/Graviton2, Python 3.12, 256 MB, timeout 60s.
   Disparada por EventBridge Scheduler `rate(5 minutes)`.
 - **Lambda `delay-metrics`** — disparada por EventBridge cuando se crea un objeto
   en `zamora-trains/`. Publica métricas en el namespace CloudWatch `ZamoraTrains`
   (`TrainDelayMinutes`, `TrainPassage`, `TrainsWithDelay`).
-- **Glue Database + Crawler** — el crawler indexa particiones nuevas a diario a las 3:00 AM.
+- **Glue Database + Table** — la tabla `zamora_trains` se define a mano en el
+  template (sin Crawler), con columnas que reflejan exactamente el JSON escrito
+  por `_record_passage()`. Las particiones se resuelven vía Partition Projection
+  (year/month/day), así que los datos nuevos aparecen en Athena sin ningún paso
+  adicional tras el despliegue.
 - **Athena Workgroup** — cap de 1 GB escaneado por query, resultados en el propio bucket.
 - **CloudWatch Dashboard** — retraso medio diario, trenes con retraso, invocaciones/errores.
 - **SNS + CloudWatch Alarm** (opcional) — alerta por email si un retraso supera 30 min.
@@ -250,7 +255,8 @@ ARN como secret `AWS_DEPLOY_ROLE_ARN` en los *environments* `dev`/`prod` de GitH
 ```
 
 El script compila los horarios, crea el bucket de artefactos SAM, hace `sam build`
-(en contenedor) + `sam deploy`, muestra los outputs y arranca el Glue Crawler.
+(en contenedor) + `sam deploy`, y muestra los outputs. La tabla Athena queda
+lista para consultar inmediatamente, sin pasos adicionales.
 Región por defecto: `eu-south-2` (España).
 
 ### 3. CI/CD (GitHub Actions)

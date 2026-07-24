@@ -74,12 +74,6 @@ aws cloudformation describe-stacks \
     --query "Stacks[0].Outputs[*].[OutputKey,OutputValue]" \
     --output table
 
-# ── 6. Ejecutar Crawler Glue para indexar datos iniciales ────────────────────
-echo ""
-echo ">>> Paso 6: Iniciando Glue Crawler (indexación inicial)..."
-CRAWLER_NAME="zamora-trains-crawler-${ENVIRONMENT}"
-aws glue start-crawler --name "${CRAWLER_NAME}" || echo "(El crawler puede ya estar en ejecución)"
-
 echo ""
 echo "✅ Despliegue completado. Dashboard disponible en CloudWatch."
 echo "   Para consultar datos: aws athena start-query-execution \\"

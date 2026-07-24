@@ -3,7 +3,7 @@
 -- Queries Athena para el Data Lake de trenes Zamora
 -- Workgroup: zamora-trains-prod
 -- Database:  zamora_trains_db
--- Table:     zamora_trains (creada por Glue Crawler)
+-- Table:     zamora_trains (definida en infrastructure/template.yaml, sin Crawler)
 -- ============================================================
 
 -- ── 1. Retraso medio por sentido (último mes) ────────────────────────────────
