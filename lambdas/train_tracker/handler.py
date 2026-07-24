@@ -128,7 +128,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
         _record_passage(scheduled, live, now_local, capturado_en_zamora=True)
 
         from datetime import timedelta
-        h, m = map(int, scheduled["hora_paso_zamora"].split(":"))
+        h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
         hora_llegada_real = (
             datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
         ).strftime("%H:%M")
