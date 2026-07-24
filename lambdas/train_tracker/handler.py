@@ -133,7 +133,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
             datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
         ).strftime("%H:%M")
 
-        _mark_done(cod, now_local, hora_llegada_real=hora_llegada_real)
+        _mark_done(cod, now_local, hora_llegada_real=hora_llegada_real, capturado_en_zamora=True)
         return True
 
     # ── Todavía no ha llegado: actualizar estado en DynamoDB ─────────────────
@@ -168,17 +168,28 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
     if live is None:
         if seen_before:
             from datetime import timedelta
+
+            # Un tren solo puede darse por llegado a Madrid si antes ha pasado
+            # realmente por Zamora (evita falsos positivos de trenes marcados
+            # como llegados sin haber pasado por Zamora).
+            if not state.get("capturado_en_zamora", False):
+                logger.warning(
+                    "Tren %s (Madrid) desaparecido de la flota pero aún no había "
+                    "pasado por Zamora → no se da por llegado", cod
+                )
+                return False
+
             h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
             hora_llegada_programada = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
 
             # Algunos trenes desaparecen de la flota antes de llegar realmente
             # a destino (hueco de cobertura GPS, cambio de composición, etc.).
-            # Para evitar falsos positivos, solo se acepta la desaparición como
-            # señal de llegada si ocurre a partir de 5 min antes de la hora
+            # Para evitar falsos positivos, solo se empieza a contar reintentos
+            # si la desaparición ocurre a partir de 10 min antes de la hora
             # programada; si es más pronto, se reintenta en la próxima ejecución,
             # con un límite de reintentos = floor(ult_retraso / 5) (mínimo 1)
             # antes de darlo por llegado igualmente con los últimos datos conocidos.
-            if now_local < hora_llegada_programada - timedelta(minutes=5):
+            if now_local >= hora_llegada_programada - timedelta(minutes=10):
                 ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
                 max_reintentos = max(1, ult_retraso_conocido // 5)
                 reintentos = int(state.get("retries", 0) or 0)
@@ -199,6 +210,13 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
                     "antes de hora → se da por llegado con los últimos datos conocidos",
                     cod, max_reintentos
                 )
+            else:
+                logger.warning(
+                    "Tren %s (Madrid) desaparecido de la flota pero aún no ha "
+                    "llegado (hora actual: %s, hora programada: %s)",
+                    cod, now_local.strftime("%H:%M"), scheduled["hora_llegada_destino"]
+                )
+                return False
 
             # No hay datos en vivo; usamos el último estado conocido.
             last_known = {
@@ -229,7 +247,10 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
         return True
 
     # ── Aún en ruta hacia Madrid: actualizar estado en DynamoDB ──────────────
-    _update_state(cod, scheduled, ult_retraso, cod_est_ant, now_local)
+    # Una vez capturado pasando por Zamora, se mantiene marcado aunque el
+    # tren ya haya dejado atrás esa estación en ejecuciones posteriores.
+    capturado_en_zamora = bool(state and state.get("capturado_en_zamora")) or cod_est_ant == ZAMORA_CODE
+    _update_state(cod, scheduled, ult_retraso, cod_est_ant, now_local, capturado_en_zamora=capturado_en_zamora)
     logger.info(
         "Tren %s (Madrid) aún en ruta (última est: %s, retraso: %d min)",
         cod, cod_est_ant, ult_retraso
@@ -273,7 +294,7 @@ def _record_passage(scheduled: dict, live: dict, now_local: datetime):
 
 
 def _update_state(cod: str, scheduled: dict, retraso: int,
-                  cod_est_ant: str, now_local: datetime):
+                  cod_est_ant: str, now_local: datetime, capturado_en_zamora: bool = False):
     """Persiste el estado transitorio del tren en DynamoDB."""
     import time
     from datetime import timedelta
@@ -294,26 +315,32 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
         "hora_llegada_real": hora_llegada_real,
         "ult_retraso": retraso,
         "cod_est_ant": cod_est_ant or "UNKNOWN",
+        "capturado_en_zamora": capturado_en_zamora,
         "updated_at":  now_local.isoformat(),
         "done":        False,
         "ttl":         ttl,
     })
 
 
-def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = None):
+def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = None,
+               capturado_en_zamora: bool | None = None):
     """Marca el tren como completamente procesado para hoy."""
+    set_parts = ["done = :done"]
+    values = {":done": True}
+
     if hora_llegada_real is not None:
-        state_table.update_item(
-            Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
-            UpdateExpression="SET done = :done, hora_llegada_real = :hora_real",
-            ExpressionAttributeValues={":done": True, ":hora_real": hora_llegada_real},
-        )
-    else:
-        state_table.update_item(
-            Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
-            UpdateExpression="SET done = :done",
-            ExpressionAttributeValues={":done": True},
-        )
+        set_parts.append("hora_llegada_real = :hora_real")
+        values[":hora_real"] = hora_llegada_real
+
+    if capturado_en_zamora is not None:
+        set_parts.append("capturado_en_zamora = :capturado")
+        values[":capturado"] = capturado_en_zamora
+
+    state_table.update_item(
+        Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
+        UpdateExpression="SET " + ", ".join(set_parts),
+        ExpressionAttributeValues=values,
+    )
 
 
 def _increment_retry_count(cod: str, now_local: datetime):
