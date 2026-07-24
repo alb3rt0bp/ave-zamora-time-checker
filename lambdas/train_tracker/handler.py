@@ -84,6 +84,8 @@ def lambda_handler(event, context):
 
     processed = 0
     for scheduled_train in active_trains:
+        logger.info(f'Procesando el tren {scheduled_train["cod_comercial"]} ({scheduled_train.get("sentido")})')
+        logger.debug('Datos del tren', scheduled_train)
         cod = scheduled_train["cod_comercial"]
         # train_data puede ser None (tren no presente en la flota). Para los
         # trenes con sentido Madrid esa ausencia es significativa (llegada a
@@ -117,7 +119,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
 
     # ── Sentido Galicia: comportamiento original (grabar al pasar por Zamora) ─
     if live is None:
-        logger.warning("Tren %s no encontrado en flota (¿aún no ha salido?)", cod)
+        logger.warning("Tren %s (%s)no encontrado en flota (¿aún no ha salido?)", cod, scheduled["sentido"])
         return False
 
     cod_est_ant = live.get("codEstAnt", "")
