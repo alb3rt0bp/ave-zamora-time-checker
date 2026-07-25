@@ -3,18 +3,20 @@ schedule_matcher.py
 Determina qué trenes están dentro de la ventana de monitorización activa
 en el momento de la ejecución de la Lambda.
 
-Ventana: desde (hora_programada - window_min) hasta (hora_programada + window_min + max_delay_buffer)
-donde max_delay_buffer = 60 min (cubre retrasos habituales de Renfe)
+Ventana según sentido:
+  - Madrid:  desde (hora_salida - 1h) hasta (hora_llegada_destino +
+             último retraso conocido en DynamoDB + 10 min). Si aún no hay
+             estado en DynamoDB, se asume retraso 0.
+  - Galicia: desde (hora_salida - 1h) sin límite superior; se deja de
+             considerar activo cuando el estado en DynamoDB queda 'done'
+             (capturado en Zamora).
 """
 
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
-
-# Buffer adicional para retrasos grandes (minutos)
-MAX_DELAY_BUFFER_MINUTES = 60
 
 
 class ScheduleMatcher:
@@ -38,11 +40,19 @@ class ScheduleMatcher:
         self.trains: list[dict] = config["trains"]
         self.window_minutes: int = config.get("polling_window_minutes", 30)
 
-    def get_active_trains(self, now: datetime) -> list[dict]:
+    def get_active_trains(
+        self,
+        now: datetime,
+        state_lookup: Optional[Callable[[str], Optional[dict]]] = None,
+    ) -> list[dict]:
         """
         Devuelve los trenes cuya ventana de monitorización incluye `now`.
 
         `now` debe ser un datetime con timezone (hora local española).
+        `state_lookup(cod_comercial)` devuelve el último estado conocido en
+        DynamoDB para ese tren hoy (o None si no existe); se usa para conocer
+        el retraso acumulado y calcular con precisión el cierre de ventana de
+        los trenes con sentido Madrid.
         """
         weekday = now.weekday()  # 0=Lunes … 6=Domingo
         tipo_dia = self._weekday_to_tipo(weekday)
@@ -53,7 +63,7 @@ class ScheduleMatcher:
             if train["tipo_dia"] != tipo_dia:
                 continue
             # Verificar ventana temporal
-            if self._in_window(train["hora_salida"], now):
+            if self._is_active(train, now, state_lookup):
                 active.append(train)
 
         return active
@@ -66,18 +76,38 @@ class ScheduleMatcher:
         else:
             return "domingo"
 
-    def _in_window(self, hora_paso: str, now: datetime) -> bool:
+    def _is_active(
+        self,
+        train: dict,
+        now: datetime,
+        state_lookup: Optional[Callable[[str], Optional[dict]]],
+    ) -> bool:
         """
-        Devuelve True si `now` está en el intervalo:
-          [hora_paso - window_min,  hora_paso + window_min + MAX_DELAY_BUFFER]
+        Ventana activa desde (hora_salida - 1h). El cierre depende del sentido:
+          - Madrid:  hora_llegada_destino + último retraso conocido + 10 min.
+          - Galicia: sin cierre por tiempo (lo detiene el estado 'done').
         """
-        h, m = map(int, hora_paso.split(":"))
-        scheduled = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        h, m = map(int, train["hora_salida"].split(":"))
+        salida = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        window_start = salida - timedelta(hours=1)
 
-        window_start = scheduled - timedelta(minutes=self.window_minutes)
-        window_end   = scheduled + timedelta(minutes=self.window_minutes + MAX_DELAY_BUFFER_MINUTES)
+        if now < window_start:
+            return False
 
-        return window_start <= now <= window_end
+        if train["sentido"] != "Madrid":
+            return True
+
+        hh, mm = map(int, train["hora_llegada_destino"].split(":"))
+        llegada_programada = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+
+        ult_retraso = 0
+        if state_lookup is not None:
+            state = state_lookup(train["cod_comercial"])
+            if state:
+                ult_retraso = int(state.get("ult_retraso", 0) or 0)
+
+        window_end = llegada_programada + timedelta(minutes=ult_retraso + 10)
+        return now <= window_end
 
     def get_trains_for_day_type(self, tipo_dia: str) -> list[dict]:
         """Filtra trenes por tipo de día (útil para tests y scripts)."""

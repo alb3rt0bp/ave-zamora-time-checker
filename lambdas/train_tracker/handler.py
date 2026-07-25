@@ -3,24 +3,29 @@ handler.py — Lambda: train-tracker
 Ejecutada cada 5 minutos por EventBridge Scheduler.
 
 Lógica:
-1. Determinar qué trenes tienen ventana activa ahora mismo (±30 min respecto
-   a su hora de paso programada por Zamora).
+1. Determinar qué trenes tienen ventana activa ahora mismo (ver
+   schedule_matcher.py: la ventana depende del sentido y, para Madrid, del
+   último retraso conocido en DynamoDB).
 2. Descargar flotaLD.json de Renfe.
 3. Para cada tren activo, buscar su entrada en la flota.
 4. Punto de grabación en S3 según el sentido:
-   - Galicia: cuando pasa por Zamora (codEstAnt == ZAMORA_CODE).
+   - Galicia: cuando pasa por Zamora (codEstAnt == ZAMORA_CODE). Sin cierre
+     de ventana por tiempo: se sigue intentando hasta capturarlo.
    - Madrid: cuando llega a Madrid Chamartín, detectado porque el tren
-     desaparece de la flota (habiendo sido visto antes) o porque
+     desaparece de la flota (habiendo sido visto antes y a partir de
+     hora_llegada_destino + retraso conocido) o porque
      codEstAnt == CHAMARTIN_CODE.
 5. Si aún no ha llegado → actualizar estado en DynamoDB (se revisará
    en la próxima ejecución en 5 min).
-6. Si hay retraso acumulado, ajustar la ventana de monitorización.
+6. Trenes Madrid cuya ventana cierra sin haber sido detectados como llegados
+   se resuelven igualmente con los últimos datos conocidos
+   (_resolve_expired_madrid_trains).
 """
 
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import boto3
 
@@ -63,40 +68,50 @@ def lambda_handler(event, context):
 
     logger.info("Ejecución iniciada: %s (local: %s)", now_utc.isoformat(), now_local.isoformat())
 
-    # 1. ¿Qué trenes tienen ventana activa ahora?
-    active_trains = matcher.get_active_trains(now_local)
-    if not active_trains:
-        logger.info("No hay trenes en ventana activa. Saliendo.")
-        return {"statusCode": 200, "active": 0}
-
+    # 1. ¿Qué trenes tienen ventana activa ahora? Para Madrid, el cierre de
+    # ventana depende del último retraso conocido en DynamoDB.
+    active_trains = matcher.get_active_trains(
+        now_local, state_lookup=lambda cod: _get_state(cod, now_local)
+    )
     logger.debug("Trenes en ventana activa: %s", [t["cod_comercial"] for t in active_trains])
 
-    # 2. Descargar flota en tiempo real
-    try:
-        flota = renfe_client.get_flota()
-    except Exception as exc:
-        logger.error("Error descargando flotaLD.json: %s", exc)
-        # No hay que fallar la Lambda; se reintentará en 5 min
-        return {"statusCode": 503, "error": str(exc)}
-
-    # Indexar flota por codComercial para O(1) lookup
-    flota_index = {t.get("codComercial", ""): t for t in flota}
-
     processed = 0
-    for scheduled_train in active_trains:
-        logger.info(f'Procesando el tren {scheduled_train["cod_comercial"]} ({scheduled_train.get("sentido")})')
-        logger.debug('Datos del tren', scheduled_train)
-        cod = scheduled_train["cod_comercial"]
-        # train_data puede ser None (tren no presente en la flota). Para los
-        # trenes con sentido Madrid esa ausencia es significativa (llegada a
-        # Chamartín), por eso lo delegamos siempre en _process_train.
-        train_data = flota_index.get(cod)
 
-        result = _process_train(scheduled_train, train_data, now_local)
-        if result:
-            processed += 1
+    if active_trains:
+        # 2. Descargar flota en tiempo real
+        try:
+            flota = renfe_client.get_flota()
+        except Exception as exc:
+            logger.error("Error descargando flotaLD.json: %s", exc)
+            # No hay que fallar la Lambda; se reintentará en 5 min
+            return {"statusCode": 503, "error": str(exc)}
 
-    logger.info("Trenes procesados y grabados: %d / %d activos", processed, len(active_trains))
+        # Indexar flota por codComercial para O(1) lookup
+        flota_index = {t.get("codComercial", ""): t for t in flota}
+
+        for scheduled_train in active_trains:
+            logger.info(f'Procesando el tren {scheduled_train["cod_comercial"]} ({scheduled_train.get("sentido")})')
+            cod = scheduled_train["cod_comercial"]
+            # train_data puede ser None (tren no presente en la flota). Para los
+            # trenes con sentido Madrid esa ausencia es significativa (llegada a
+            # Chamartín), por eso lo delegamos siempre en _process_train.
+            train_data = flota_index.get(cod)
+
+            if _process_train(scheduled_train, train_data, now_local):
+                processed += 1
+    else:
+        logger.info("No hay trenes en ventana activa.")
+
+    # 3. Trenes Madrid cuya ventana ya cerró sin haber sido detectados como
+    # llegados (ni Chamartín ni desaparición) → resolver con últimos datos
+    # conocidos para no perder el dato de puntualidad de ese día.
+    resolved = _resolve_expired_madrid_trains(now_local)
+    processed += resolved
+
+    logger.info(
+        "Trenes procesados y grabados: %d / %d activos (%d resueltos por cierre de ventana)",
+        processed, len(active_trains), resolved
+    )
     return {"statusCode": 200, "active": len(active_trains), "recorded": processed}
 
 
@@ -117,7 +132,12 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
     if scheduled["sentido"] == "Madrid":
         return _process_madrid_train(scheduled, live, now_local)
 
-    # ── Sentido Galicia: comportamiento original (grabar al pasar por Zamora) ─
+    # ── Sentido Galicia: grabar al pasar por Zamora, ventana sin cierre por
+    # tiempo (se sigue intentando hasta capturarlo) ──────────────────────────
+    state = _get_state(cod, now_local)
+    if state and state.get("done"):
+        return False
+
     if live is None:
         logger.warning("Tren %s (%s)no encontrado en flota (¿aún no ha salido?)", cod, scheduled["sentido"])
         return False
@@ -129,7 +149,6 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime) -> b
     if cod_est_ant == ZAMORA_CODE:
         _record_passage(scheduled, live, now_local, capturado_en_zamora=True)
 
-        from datetime import timedelta
         h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
         hora_llegada_real = (
             datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
@@ -154,8 +173,12 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
 
     Llegada detectada por cualquiera de estas dos vías:
       1. El tren ya no aparece en la flota, habiendo sido visto en una ejecución
-         anterior (existe estado en DynamoDB).
+         anterior (existe estado en DynamoDB), y ya se ha alcanzado
+         hora_llegada_destino + último retraso conocido.
       2. `codEstAnt == CHAMARTIN_CODE`.
+
+    Si la ventana se cierra sin ninguna de las dos detecciones, se resuelve
+    aparte en _resolve_expired_madrid_trains().
     """
     cod   = scheduled["cod_comercial"]
     state = _get_state(cod, now_local)
@@ -169,8 +192,6 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
     # ── Vía 1: desaparecido de la flota tras haber sido visto → llegó a Madrid ─
     if live is None:
         if seen_before:
-            from datetime import timedelta
-
             # Un tren solo puede darse por llegado a Madrid si antes ha pasado
             # realmente por Zamora (evita falsos positivos de trenes marcados
             # como llegados sin haber pasado por Zamora).
@@ -183,40 +204,21 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
 
             h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
             hora_llegada_programada = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+            ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
+            inicio_reintentos = hora_llegada_programada + timedelta(minutes=ult_retraso_conocido)
 
-            # Algunos trenes desaparecen de la flota antes de llegar realmente
-            # a destino (hueco de cobertura GPS, cambio de composición, etc.).
-            # Para evitar falsos positivos, solo se empieza a contar reintentos
-            # si la desaparición ocurre a partir de 10 min antes de la hora
-            # programada; si es más pronto, se reintenta en la próxima ejecución,
-            # con un límite de reintentos = floor(ult_retraso / 5) (mínimo 1)
-            # antes de darlo por llegado igualmente con los últimos datos conocidos.
-            if now_local >= hora_llegada_programada - timedelta(minutes=10):
-                ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
-                max_reintentos = max(1, ult_retraso_conocido // 5)
-                reintentos = int(state.get("retries", 0) or 0)
-
-                if reintentos < max_reintentos:
-                    _increment_retry_count(cod, now_local)
-                    logger.warning(
-                        "Tren %s (Madrid) desaparecido de la flota demasiado pronto "
-                        "(hora actual: %s, hora programada: %s) → reintento %d/%d, "
-                        "no se da por llegado todavía",
-                        cod, now_local.strftime("%H:%M"), scheduled["hora_llegada_destino"],
-                        reintentos + 1, max_reintentos
-                    )
-                    return False
-
-                logger.warning(
-                    "Tren %s (Madrid) agotó los %d reintentos tras desaparecer "
-                    "antes de hora → se da por llegado con los últimos datos conocidos",
-                    cod, max_reintentos
-                )
-            else:
+            # Los reintentos (aceptar la desaparición como señal de llegada)
+            # solo empiezan a partir de hora_llegada_destino + último retraso
+            # conocido. Antes de eso, una desaparición se considera un hueco
+            # de cobertura y simplemente se espera al siguiente ciclo; la
+            # propia ventana activa (calculada en schedule_matcher, cierra
+            # 10 min después de este mismo instante) limita cuántos ciclos
+            # de 5 min se reintentará.
+            if now_local < inicio_reintentos:
                 logger.warning(
                     "Tren %s (Madrid) desaparecido de la flota pero aún no ha "
-                    "llegado (hora actual: %s, hora programada: %s)",
-                    cod, now_local.strftime("%H:%M"), scheduled["hora_llegada_destino"]
+                    "llegado (hora actual: %s, hora prevista: %s)",
+                    cod, now_local.strftime("%H:%M"), inicio_reintentos.strftime("%H:%M")
                 )
                 return False
 
@@ -277,7 +279,6 @@ def _record_passage(scheduled: dict, live: dict, now_local: datetime, capturado_
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
     hora_programada = scheduled["hora_llegada_destino"]  # "HH:MM"
     h, m = map(int, hora_programada.split(":"))
-    from datetime import timedelta
     hora_real = now_local.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(minutes=ult_retraso)
 
     record = {
@@ -309,7 +310,6 @@ def _end_of_day_ttl(now_local: datetime) -> int:
 def _update_state(cod: str, scheduled: dict, retraso: int,
                   cod_est_ant: str, now_local: datetime, capturado_en_zamora: bool = False):
     """Persiste el estado transitorio del tren en DynamoDB."""
-    from datetime import timedelta
     ttl = _end_of_day_ttl(now_local)  # expira a las 23:59:59 del mismo día
 
     h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
@@ -360,10 +360,42 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = No
     )
 
 
-def _increment_retry_count(cod: str, now_local: datetime):
-    """Incrementa el contador de reintentos por desaparición prematura de la flota."""
-    state_table.update_item(
-        Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},
-        UpdateExpression="ADD retries :one",
-        ExpressionAttributeValues={":one": 1},
-    )
+def _resolve_expired_madrid_trains(now_local: datetime) -> int:
+    """
+    Recorre los trenes Madrid con estado pendiente en DynamoDB (no 'done')
+    cuya ventana (hora_llegada_destino + último retraso conocido + 10 min)
+    ya se ha cerrado sin haber sido detectados como llegados (ni Chamartín ni
+    desaparición), y los registra igualmente con los últimos datos conocidos
+    para no perder el dato de puntualidad de ese tren ese día.
+    """
+    resolved = 0
+    for train in schedules_config["trains"]:
+        if train["sentido"] != "Madrid":
+            continue
+
+        cod = train["cod_comercial"]
+        state = _get_state(cod, now_local)
+        if not state or state.get("done"):
+            continue
+
+        h, m = map(int, train["hora_llegada_destino"].split(":"))
+        hora_llegada_programada = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+        ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
+        window_end = hora_llegada_programada + timedelta(minutes=ult_retraso_conocido + 10)
+
+        if now_local <= window_end:
+            continue  # todavía dentro de ventana, se resolverá por el flujo normal
+
+        last_known = {
+            "ultRetraso": state.get("ult_retraso", 0),
+            "codEstAnt":  state.get("cod_est_ant"),
+        }
+        _record_passage(train, last_known, now_local, capturado_en_zamora=bool(state.get("capturado_en_zamora")))
+        _mark_done(cod, now_local)
+        logger.warning(
+            "Tren %s (Madrid) ventana cerrada sin detección → registrado con "
+            "últimos datos conocidos (retraso: %d min)", cod, ult_retraso_conocido
+        )
+        resolved += 1
+
+    return resolved
