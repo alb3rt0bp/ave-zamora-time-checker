@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class ScheduleMatcher:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, log_extra: dict):
         """
         config: contenido de train_schedules.json
         {
@@ -39,6 +39,7 @@ class ScheduleMatcher:
         """
         self.trains: list[dict] = config["trains"]
         self.window_minutes: int = config.get("polling_window_minutes", 30)
+        self.log_extra = log_extra
 
     def get_active_trains(
         self,

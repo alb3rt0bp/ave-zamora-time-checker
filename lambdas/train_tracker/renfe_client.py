@@ -21,7 +21,7 @@ CACHE_TTL_SECONDS = 60
 
 
 class RenfeClient:
-    def __init__(self, timeout_seconds: int = 15):
+    def __init__(self, log_extra, timeout_seconds: int = 15):
         self.timeout = timeout_seconds
         self._flota_cache: Optional[list] = None
         self._flota_cache_time: Optional[datetime] = None
@@ -49,7 +49,7 @@ class RenfeClient:
             and self._flota_cache_time is not None
             and (now - self._flota_cache_time).total_seconds() < CACHE_TTL_SECONDS
         ):
-            logger.debug("Usando caché de flota (%d trenes)", len(self._flota_cache))
+            logger.debug("Usando caché de flota (%d trenes)", len(self._flota_cache), extra=self.log_extra)
             return self._flota_cache
 
         raw = self._fetch(FLOTA_URL)
@@ -67,7 +67,7 @@ class RenfeClient:
         else:
             trains = []
 
-        logger.debug("flotaLD.json: %d trenes activos", len(trains))
+        logger.debug("flotaLD.json: %d trenes activos", len(trains), extra=self.log_extra)
         self._flota_cache = trains
         self._flota_cache_time = now
         return trains
@@ -99,8 +99,8 @@ class RenfeClient:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
                 return response.read()
         except urllib.error.HTTPError as exc:
-            logger.error("HTTP %d al acceder a %s", exc.code, url)
+            logger.error("HTTP %d al acceder a %s", exc.code, url, extra=self.log_extra)
             raise
         except urllib.error.URLError as exc:
-            logger.error("Error de red accediendo a %s: %s", url, exc.reason)
+            logger.error("Error de red accediendo a %s: %s", url, exc.reason, extra=self.log_extra)
             raise

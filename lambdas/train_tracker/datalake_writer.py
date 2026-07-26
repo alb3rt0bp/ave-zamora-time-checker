@@ -26,9 +26,10 @@ S3_PREFIX = "zamora-trains"
 
 
 class DatalakeWriter:
-    def __init__(self, s3_client, bucket: str):
+    def __init__(self, s3_client, bucket: str, log_extra):
         self.s3 = s3_client
         self.bucket = bucket
+        self.log_extra = log_extra
 
     def write(self, record: dict, timestamp: datetime) -> str:
         """
@@ -53,7 +54,7 @@ class DatalakeWriter:
             },
         )
 
-        logger.info("S3 put_object: s3://%s/%s", self.bucket, key)
+        logger.info("S3 put_object: s3://%s/%s", self.bucket, key, extra=self.log_extra)
         return key
 
     def _build_key(self, cod: str, sentido: str, ts: datetime) -> str:
@@ -80,5 +81,5 @@ class DatalakeWriter:
                 key = self.write(record, timestamp)
                 keys.append(key)
             except Exception as exc:
-                logger.error("Error escribiendo %s: %s", record.get("event_id"), exc)
+                logger.error("Error escribiendo %s: %s", record.get("event_id"), exc, extra=self.log_extra)
         return keys
