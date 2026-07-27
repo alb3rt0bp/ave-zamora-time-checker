@@ -224,3 +224,7 @@ __marimo__/
 # Claude
 .claude
 CLAUDE.md
+
+# Repo specific
+config/train_schedules.json
+tests/reports

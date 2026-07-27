@@ -109,7 +109,7 @@ def lambda_handler(event, context):
     # 3. Trenes Madrid cuya ventana ya cerró sin haber sido detectados como
     # llegados (ni Chamartín ni desaparición) → resolver con últimos datos
     # conocidos para no perder el dato de puntualidad de ese día.
-    resolved = _resolve_expired_madrid_trains(now_local, log_extra)
+    resolved = _resolve_expired_madrid_trains(now_local, log_extra, writer)
     processed += resolved
 
     logger.info(
@@ -366,7 +366,7 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = No
     )
 
 
-def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict) -> int:
+def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict, writer: DatalakeWriter) -> int:
     """
     Recorre los trenes Madrid con estado pendiente en DynamoDB (no 'done')
     cuya ventana (hora_llegada_destino + último retraso conocido + 10 min)
@@ -396,7 +396,7 @@ def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict) -> int:
             "ultRetraso": state.get("ult_retraso", 0),
             "codEstAnt":  state.get("cod_est_ant"),
         }
-        _record_passage(train, last_known, now_local, log_extra, capturado_en_zamora=bool(state.get("capturado_en_zamora")))
+        _record_passage(train, last_known, now_local, log_extra, writer, capturado_en_zamora=bool(state.get("capturado_en_zamora")))
         _mark_done(cod, now_local)
         logger.warning(
             "Tren %s (Madrid) ventana cerrada sin detección → registrado con "

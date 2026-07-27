@@ -1,0 +1,44 @@
+{
+  "version": "test",
+  "generated_at": "2026-01-01T00:00:00+00:00",
+  "zamora_station_code": "30200",
+  "polling_window_minutes": 30,
+  "trains": [
+    {
+      "cod_comercial": "M100",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [0, 1, 2, 3, 4],
+      "hora_salida": "07:00",
+      "hora_llegada_destino": "08:30",
+      "duracion_raw": "1 h. 30 min."
+    },
+    {
+      "cod_comercial": "G100",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [0, 1, 2, 3, 4],
+      "hora_salida": "08:00",
+      "hora_llegada_destino": "09:30",
+      "duracion_raw": "1 h. 30 min."
+    },
+    {
+      "cod_comercial": "M200",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [6],
+      "hora_salida": "09:00",
+      "hora_llegada_destino": "10:15",
+      "duracion_raw": "1 h. 15 min."
+    },
+    {
+      "cod_comercial": "G200",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [6],
+      "hora_salida": "10:00",
+      "hora_llegada_destino": "11:20",
+      "duracion_raw": "1 h. 20 min."
+    }
+  ]
+}

@@ -1,35 +1,28 @@
 """
 renfe_client.py
 Cliente HTTP para los endpoints de Renfe en tiempo real.
-Incluye caché en memoria para evitar llamadas duplicadas en la misma ejecución.
 """
 
 import json
 import logging
 import urllib.request
 import urllib.error
-from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 FLOTA_URL         = "https://tiempo-real.largorecorrido.renfe.com/renfe-visor/flotaLD.json"
 TRENES_ESTACIONES = "https://tiempo-real.largorecorrido.renfe.com/renfe-visor/trenesConEstacionesLD.json"
 
-# Tiempo de caché: no tiene sentido llamar más de una vez por minuto
-CACHE_TTL_SECONDS = 60
-
 
 class RenfeClient:
     def __init__(self, log_extra, timeout_seconds: int = 15):
         self.timeout = timeout_seconds
-        self._flota_cache: Optional[list] = None
-        self._flota_cache_time: Optional[datetime] = None
+        self.log_extra = log_extra
 
     def get_flota(self) -> list[dict]:
         """
         Descarga flotaLD.json y devuelve la lista de trenes activos.
-        
+
         Estructura esperada de cada elemento (campos relevantes):
         {
           "codComercial": "04154",
@@ -41,17 +34,6 @@ class RenfeClient:
           ...
         }
         """
-        now = datetime.now(timezone.utc)
-
-        # Devolver caché si es reciente
-        if (
-            self._flota_cache is not None
-            and self._flota_cache_time is not None
-            and (now - self._flota_cache_time).total_seconds() < CACHE_TTL_SECONDS
-        ):
-            logger.debug("Usando caché de flota (%d trenes)", len(self._flota_cache), extra=self.log_extra)
-            return self._flota_cache
-
         raw = self._fetch(FLOTA_URL)
         data = json.loads(raw)
 
@@ -68,8 +50,6 @@ class RenfeClient:
             trains = []
 
         logger.debug("flotaLD.json: %d trenes activos", len(trains), extra=self.log_extra)
-        self._flota_cache = trains
-        self._flota_cache_time = now
         return trains
 
     def get_trenes_con_estaciones(self) -> list[dict]:

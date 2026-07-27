@@ -1,0 +1,686 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-07-26T16:08:15.527638+00:00",
+  "zamora_station_code": "71801",
+  "polling_window_minutes": 30,
+  "trains": [
+    {
+      "cod_comercial": "04475",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "08:19",
+      "hora_llegada_destino": "09:32",
+      "duracion_raw": "1 h. 13 min."
+    },
+    {
+      "cod_comercial": "04505",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "09:57",
+      "hora_llegada_destino": "11:08",
+      "duracion_raw": "1 h. 11 min."
+    },
+    {
+      "cod_comercial": "04325",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "13:13",
+      "hora_llegada_destino": "14:40",
+      "duracion_raw": "1 h. 27 min."
+    },
+    {
+      "cod_comercial": "04345",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "14:33",
+      "hora_llegada_destino": "15:43",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04565",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "15:25",
+      "hora_llegada_destino": "16:36",
+      "duracion_raw": "1 h. 11 min."
+    },
+    {
+      "cod_comercial": "04375",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "17:03",
+      "hora_llegada_destino": "18:17",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "04975",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "17:59",
+      "hora_llegada_destino": "19:16",
+      "duracion_raw": "1 h. 17 min."
+    },
+    {
+      "cod_comercial": "04395",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "19:10",
+      "hora_llegada_destino": "20:20",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04405",
+      "sentido": "Galicia",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "20:16",
+      "hora_llegada_destino": "21:26",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04295",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "06:23",
+      "hora_llegada_destino": "07:45",
+      "duracion_raw": "1 h. 22 min."
+    },
+    {
+      "cod_comercial": "04475",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "08:19",
+      "hora_llegada_destino": "09:32",
+      "duracion_raw": "1 h. 13 min."
+    },
+    {
+      "cod_comercial": "05273",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "09:57",
+      "hora_llegada_destino": "11:07",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04515",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "11:10",
+      "hora_llegada_destino": "12:21",
+      "duracion_raw": "1 h. 11 min."
+    },
+    {
+      "cod_comercial": "04325",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "13:13",
+      "hora_llegada_destino": "14:40",
+      "duracion_raw": "1 h. 27 min."
+    },
+    {
+      "cod_comercial": "04345",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "14:33",
+      "hora_llegada_destino": "15:43",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04565",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "15:25",
+      "hora_llegada_destino": "16:36",
+      "duracion_raw": "1 h. 11 min."
+    },
+    {
+      "cod_comercial": "04375",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "17:03",
+      "hora_llegada_destino": "18:17",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "04975",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "17:59",
+      "hora_llegada_destino": "19:16",
+      "duracion_raw": "1 h. 17 min."
+    },
+    {
+      "cod_comercial": "04395",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "19:10",
+      "hora_llegada_destino": "20:20",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04405",
+      "sentido": "Galicia",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "20:16",
+      "hora_llegada_destino": "21:26",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04295",
+      "sentido": "Galicia",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "06:23",
+      "hora_llegada_destino": "07:45",
+      "duracion_raw": "1 h. 22 min."
+    },
+    {
+      "cod_comercial": "04475",
+      "sentido": "Galicia",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "08:19",
+      "hora_llegada_destino": "09:32",
+      "duracion_raw": "1 h. 13 min."
+    },
+    {
+      "cod_comercial": "05273",
+      "sentido": "Galicia",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "09:57",
+      "hora_llegada_destino": "11:07",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04515",
+      "sentido": "Galicia",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "11:10",
+      "hora_llegada_destino": "12:21",
+      "duracion_raw": "1 h. 11 min."
+    },
+    {
+      "cod_comercial": "04325",
+      "sentido": "Galicia",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "13:13",
+      "hora_llegada_destino": "14:40",
+      "duracion_raw": "1 h. 27 min."
+    },
+    {
+      "cod_comercial": "04345",
+      "sentido": "Galicia",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "14:33",
+      "hora_llegada_destino": "15:43",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04975",
+      "sentido": "Galicia",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "17:59",
+      "hora_llegada_destino": "19:16",
+      "duracion_raw": "1 h. 17 min."
+    },
+    {
+      "cod_comercial": "04395",
+      "sentido": "Galicia",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "19:10",
+      "hora_llegada_destino": "20:20",
+      "duracion_raw": "1 h. 10 min."
+    },
+    {
+      "cod_comercial": "04114",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "08:39",
+      "hora_llegada_destino": "10:20",
+      "duracion_raw": "1 h. 41 min."
+    },
+    {
+      "cod_comercial": "04364",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "09:38",
+      "hora_llegada_destino": "10:52",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "04494",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "12:56",
+      "hora_llegada_destino": "14:15",
+      "duracion_raw": "1 h. 19 min."
+    },
+    {
+      "cod_comercial": "04314",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "13:43",
+      "hora_llegada_destino": "14:57",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "04254",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "16:30",
+      "hora_llegada_destino": "17:44",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "05382",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "17:36",
+      "hora_llegada_destino": "18:47",
+      "duracion_raw": "1 h. 11 min."
+    },
+    {
+      "cod_comercial": "04334",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "18:33",
+      "hora_llegada_destino": "19:58",
+      "duracion_raw": "1 h. 25 min."
+    },
+    {
+      "cod_comercial": "04384",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "20:11",
+      "hora_llegada_destino": "21:27",
+      "duracion_raw": "1 h. 16 min."
+    },
+    {
+      "cod_comercial": "04404",
+      "sentido": "Madrid",
+      "tipo_dia": "domingo",
+      "weekdays": [
+        6
+      ],
+      "hora_salida": "22:00",
+      "hora_llegada_destino": "23:14",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "04154",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "07:41",
+      "hora_llegada_destino": "08:56",
+      "duracion_raw": "1 h. 15 min."
+    },
+    {
+      "cod_comercial": "04114",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "08:39",
+      "hora_llegada_destino": "10:20",
+      "duracion_raw": "1 h. 41 min."
+    },
+    {
+      "cod_comercial": "04364",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "09:38",
+      "hora_llegada_destino": "10:52",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "04494",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "12:56",
+      "hora_llegada_destino": "14:15",
+      "duracion_raw": "1 h. 19 min."
+    },
+    {
+      "cod_comercial": "04314",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "13:43",
+      "hora_llegada_destino": "14:57",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "04254",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "16:30",
+      "hora_llegada_destino": "17:44",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "05382",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "17:36",
+      "hora_llegada_destino": "18:47",
+      "duracion_raw": "1 h. 11 min."
+    },
+    {
+      "cod_comercial": "04334",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "18:33",
+      "hora_llegada_destino": "19:58",
+      "duracion_raw": "1 h. 25 min."
+    },
+    {
+      "cod_comercial": "04384",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "20:11",
+      "hora_llegada_destino": "21:27",
+      "duracion_raw": "1 h. 16 min."
+    },
+    {
+      "cod_comercial": "04404",
+      "sentido": "Madrid",
+      "tipo_dia": "laborable",
+      "weekdays": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "hora_salida": "22:00",
+      "hora_llegada_destino": "23:14",
+      "duracion_raw": "1 h. 14 min."
+    },
+    {
+      "cod_comercial": "04154",
+      "sentido": "Madrid",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "07:41",
+      "hora_llegada_destino": "08:49",
+      "duracion_raw": "1 h. 8 min."
+    },
+    {
+      "cod_comercial": "04114",
+      "sentido": "Madrid",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "08:39",
+      "hora_llegada_destino": "10:13",
+      "duracion_raw": "1 h. 34 min."
+    },
+    {
+      "cod_comercial": "04364",
+      "sentido": "Madrid",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "09:38",
+      "hora_llegada_destino": "10:45",
+      "duracion_raw": "1 h. 7 min."
+    },
+    {
+      "cod_comercial": "04494",
+      "sentido": "Madrid",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "12:56",
+      "hora_llegada_destino": "14:08",
+      "duracion_raw": "1 h. 12 min."
+    },
+    {
+      "cod_comercial": "04254",
+      "sentido": "Madrid",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "16:30",
+      "hora_llegada_destino": "17:37",
+      "duracion_raw": "1 h. 7 min."
+    },
+    {
+      "cod_comercial": "04334",
+      "sentido": "Madrid",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "18:33",
+      "hora_llegada_destino": "19:51",
+      "duracion_raw": "1 h. 18 min."
+    },
+    {
+      "cod_comercial": "04384",
+      "sentido": "Madrid",
+      "tipo_dia": "sabado",
+      "weekdays": [
+        5
+      ],
+      "hora_salida": "20:11",
+      "hora_llegada_destino": "21:20",
+      "duracion_raw": "1 h. 9 min."
+    }
+  ]
+}
