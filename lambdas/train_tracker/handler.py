@@ -159,7 +159,12 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
             datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
         ).strftime("%H:%M")
 
-        _mark_done(cod, now_local, hora_llegada_real=hora_llegada_real, capturado_en_zamora=True)
+        _mark_done(
+            cod, now_local,
+            hora_llegada_real=hora_llegada_real,
+            capturado_en_zamora=True,
+            ult_retraso=ult_retraso,
+        )
         return True
 
     # ── Todavía no ha llegado: actualizar estado en DynamoDB ─────────────────
@@ -256,7 +261,18 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
         # en los que un tren llega a Chamartín sin haber pasado por Zamora.
         capturado_en_zamora = bool(state and state.get("capturado_en_zamora"))
         _record_passage(scheduled, live, now_local, log_extra, writer, capturado_en_zamora=capturado_en_zamora)
-        _mark_done(cod, now_local)
+
+        h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
+        hora_llegada_real = (
+            datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
+        ).strftime("%H:%M")
+
+        _mark_done(
+            cod, now_local,
+            hora_llegada_real=hora_llegada_real,
+            capturado_en_zamora=capturado_en_zamora,
+            ult_retraso=ult_retraso,
+        )
         logger.info("Tren %s ha llegado a Chamartín (codEstAnt=%s)", cod, cod_est_ant, extra=log_extra)
         return True
 
@@ -341,7 +357,7 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
 
 
 def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = None,
-               capturado_en_zamora: bool | None = None):
+               capturado_en_zamora: bool | None = None, ult_retraso: int | None = None):
     """Marca el tren como completamente procesado para hoy."""
     # "ttl" es palabra reservada en DynamoDB → hay que usar un alias (#ttl).
     # Se fija siempre aquí, ya que este item puede no haber pasado nunca por
@@ -357,6 +373,14 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_real: str | None = No
     if capturado_en_zamora is not None:
         set_parts.append("capturado_en_zamora = :capturado")
         values[":capturado"] = capturado_en_zamora
+
+    if ult_retraso is not None:
+        # Debe ir siempre junto a hora_llegada_real: si no, el campo
+        # ult_retraso del item queda desfasado respecto al retraso realmente
+        # usado para calcular hora_llegada_real (el de la última vez que se
+        # llamó a _update_state, no el del ciclo en que se captura la llegada).
+        set_parts.append("ult_retraso = :ult_retraso")
+        values[":ult_retraso"] = ult_retraso
 
     state_table.update_item(
         Key={"pk": f"{cod}#{now_local.date().isoformat()}", "sk": "TRACKING"},

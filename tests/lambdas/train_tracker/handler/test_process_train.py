@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
@@ -74,6 +74,25 @@ class TestProcessTrain(HandlerTestCase):
         self.assertTrue(item["capturado_en_zamora"])
         listed = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)["Contents"]
         self.assertEqual(len(listed), 1)
+
+    def test_galicia_ult_retraso_stays_consistent_with_hora_llegada_real_across_cycles(self):
+        # Regresión: un ciclo anterior deja ult_retraso=2 en Dynamo (vía
+        # _update_state); en el ciclo en que se captura el paso por Zamora el
+        # retraso real de Renfe ha subido a 4. El item final debe reflejar el
+        # retraso de ESTE ciclo (4), no el desfasado del ciclo anterior (2).
+        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_RUTA, NOW, SAMPLE_LOG_EXTRA, self.writer)
+        self.assertEqual(self.get_item("G100", NOW.date().isoformat())["ult_retraso"], TRAIN_G100_EN_RUTA["ultRetraso"])
+
+        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, NOW, SAMPLE_LOG_EXTRA, self.writer)
+
+        item = self.get_item("G100", NOW.date().isoformat())
+        self.assertEqual(item["ult_retraso"], TRAIN_G100_EN_ZAMORA["ultRetraso"])
+
+        h, m = map(int, GALICIA_SCHEDULED["hora_llegada_destino"].split(":"))
+        expected_hora_real = (
+            datetime(2000, 1, 1, h, m) + timedelta(minutes=int(item["ult_retraso"]))
+        ).strftime("%H:%M")
+        self.assertEqual(item["hora_llegada_real"], expected_hora_real)
 
 
 if __name__ == "__main__":

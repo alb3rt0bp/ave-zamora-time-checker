@@ -58,6 +58,34 @@ class TestMarkDone(HandlerTestCase):
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertTrue(item["capturado_en_zamora"])
 
+    def test_sets_ult_retraso_when_given(self):
+        # Regresión: ult_retraso debe poder refrescarse en el mismo momento
+        # que hora_llegada_real, para que ambos campos queden consistentes
+        # entre sí (antes, ult_retraso se quedaba con el valor desfasado de
+        # la última llamada a _update_state).
+        self.table.update_item(
+            Key={"pk": f"M100#{NOW.date().isoformat()}", "sk": "TRACKING"},
+            UpdateExpression="SET ult_retraso = :v",
+            ExpressionAttributeValues={":v": 3},
+        )
+
+        self.handler._mark_done("M100", NOW, hora_llegada_real="08:47", ult_retraso=6)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["ult_retraso"], 6)
+
+    def test_does_not_touch_ult_retraso_when_not_given(self):
+        self.table.update_item(
+            Key={"pk": f"M100#{NOW.date().isoformat()}", "sk": "TRACKING"},
+            UpdateExpression="SET ult_retraso = :v",
+            ExpressionAttributeValues={":v": 3},
+        )
+
+        self.handler._mark_done("M100", NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["ult_retraso"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()

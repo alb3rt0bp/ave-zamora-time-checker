@@ -94,6 +94,27 @@ class TestProcessMadridTrain(HandlerTestCase):
         # No había pasado antes por Zamora (no hay estado previo) → se refleja False.
         self.assertFalse(item.get("capturado_en_zamora", False))
 
+    def test_via2_chamartin_refreshes_ult_retraso_and_hora_llegada_real(self):
+        # Regresión: un ciclo anterior deja ult_retraso=3 en Dynamo; en el
+        # ciclo en que se detecta la llegada a Chamartín el retraso real de
+        # Renfe es el de TRAIN_M100_EN_CHAMARTIN (5). El item final debe
+        # reflejar ese retraso fresco, no el desfasado.
+        self._put_state(_at(8, 35), capturado_en_zamora=True, ult_retraso=3, cod_est_ant="90000")
+
+        self.handler._process_madrid_train(
+            MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN, _at(8, 35), SAMPLE_LOG_EXTRA, self.writer
+        )
+
+        item = self.get_item("M100", _at(8, 35).date().isoformat())
+        self.assertEqual(item["ult_retraso"], TRAIN_M100_EN_CHAMARTIN["ultRetraso"])
+
+        from datetime import datetime, timedelta
+        h, m = map(int, MADRID_SCHEDULED["hora_llegada_destino"].split(":"))
+        expected_hora_real = (
+            datetime(2000, 1, 1, h, m) + timedelta(minutes=int(item["ult_retraso"]))
+        ).strftime("%H:%M")
+        self.assertEqual(item["hora_llegada_real"], expected_hora_real)
+
     def test_en_route_updates_state_without_recording(self):
         result = self.handler._process_madrid_train(
             MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(7, 30), SAMPLE_LOG_EXTRA, self.writer
