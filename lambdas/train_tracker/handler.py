@@ -95,12 +95,13 @@ def lambda_handler(event, context):
 
         for scheduled_train in active_trains:
             logger.info(f'Procesando el tren {scheduled_train["cod_comercial"]} ({scheduled_train.get("sentido")})', extra=log_extra)
+            logger.debug(f'Datos programados del tren {scheduled_train["cod_comercial"]} ({scheduled_train.get("sentido")}): {scheduled_train}', extra=log_extra)
             cod = scheduled_train["cod_comercial"]
             # train_data puede ser None (tren no presente en la flota). Para los
             # trenes con sentido Madrid esa ausencia es significativa (llegada a
             # Chamartín), por eso lo delegamos siempre en _process_train.
             train_data = flota_index.get(cod)
-
+            logger.debug(f'Datos en tiempo real de {scheduled_train["cod_comercial"]} ({scheduled_train.get("sentido")}: {train_data}', extra=log_extra)
             if _process_train(scheduled_train, train_data, now_local, log_extra, writer):
                 processed += 1
     else:
