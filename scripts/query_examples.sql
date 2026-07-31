@@ -75,11 +75,13 @@ ORDER BY year, month, day, sentido;
 
 -- ── 5. Días con retraso extremo (> 30 min) ──────────────────────────────────
 SELECT
-    fecha_hora_evento,
+    year,
+    month,
+    day,
     cod_comercial,
     sentido,
     hora_programada,
-    hora_real,
+    hora_llegada_corregida,
     minutos_retraso
 FROM zamora_trains
 WHERE minutos_retraso > 30

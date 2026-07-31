@@ -38,8 +38,8 @@ class TestGaliciaTrainNotArrivedZamora(HandlerTestCase):
 
         item = self.get_item("G100", "2026-01-05")
         self.assertIsNotNone(item)
-        self.assertFalse(item["done"])
-        self.assertEqual(item["cod_est_ant"], "10000")
+        self.assertFalse(item["entregado"])
+        self.assertNotIn("cod_est_ant", item)
         self.assertEqual(item["ult_retraso"], 2)
 
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)

@@ -30,9 +30,9 @@ complejidad innecesaria. La alternativa adoptada es más robusta:
 PROPUESTA ORIGINAL:          ARQUITECTURA ADOPTADA:
 ─────────────────────────    ─────────────────────────────────────────
 EventBridge × N trenes  →    EventBridge Scheduler (1 regla cada 5')
-SQS delay variable      →    DynamoDB como estado de tracking (TTL 24h)
+SQS delay variable      →    DynamoDB como estado de tracking (TTL diario)
 Lambda poll+reencola    →    Lambda stateless con lógica de ventana
-JSON files              →    S3 Data Lake + Glue + Athena
+1 JSON por tren/evento  →    1 JSONL por día (volcado diario) + Glue + Athena
 ```
 
 ### Arquitectura Event-Driven con ventana temporal
@@ -44,32 +44,49 @@ JSON files              →    S3 Data Lake + Glue + Athena
 │  ┌──────────────┐     ┌─────────────────┐     ┌──────────────────┐        │
 │  │  EventBridge │     │   Lambda        │     │   DynamoDB       │        │
 │  │  Scheduler   │────▶│  train-tracker  │────▶│  train-state     │        │
-│  │  (cada 5')   │     │  (arm64/py3.12) │     │  (TTL 24h)       │        │
-│  └──────────────┘     └────────┬────────┘     └──────────────────┘        │
-│                                │                                           │
-│                     ┌──────────┴──────────┐                               │
-│                     ▼                     ▼                               │
-│            ┌────────────────┐   ┌─────────────────┐                       │
-│            │  flotaLD.json  │   │  S3 Data Lake   │                       │
-│            │  (Renfe API)   │   │  zamora-trains/ │                       │
-│            └────────────────┘   │  year=/month=/  │                       │
-│                                 │  day=/*.json    │                       │
-│                                 └────────┬────────┘                       │
-│                                          │ S3 → EventBridge               │
-│                                          ▼                                 │
-│                                 ┌─────────────────┐   ┌───────────────┐   │
-│                                 │ Lambda          │──▶│  CloudWatch   │   │
-│                                 │ delay-metrics   │   │  Dashboard +  │   │
-│                                 └─────────────────┘   │  SNS Alarm    │   │
-│                                          │            └───────────────┘   │
-│                          ┌───────────────┴────────┐                       │
-│                          ▼                        ▼                        │
-│                 ┌────────────────┐      ┌──────────────────┐              │
-│                 │   Glue Table   │─────▶│     Athena       │              │
-│                 │ (sin Crawler)  │      │  (1 GB/query cap)│              │
-│                 └────────────────┘      └──────────────────┘              │
+│  │  (cada 5')   │     │  (arm64/py3.12) │     │  (TTL 00:30      │        │
+│  └──────────────┘     └────────┬────────┘     │   día siguiente) │        │
+│                                │               └────────┬─────────┘        │
+│                                ▼                        │                  │
+│                       ┌────────────────┐                │ scan diario     │
+│                       │  flotaLD.json  │                ▼                  │
+│                       │  (Renfe API)   │     ┌──────────────────┐          │
+│                       └────────────────┘     │  EventBridge     │          │
+│  (sin escritura a S3 durante el polling)     │  Scheduler       │          │
+│                                               │  (00:15, 1×/día) │          │
+│                                               └────────┬─────────┘          │
+│                                                        ▼                    │
+│                                               ┌──────────────────┐          │
+│                                               │  Lambda          │          │
+│                                               │  daily-dump      │          │
+│                                               └────────┬─────────┘          │
+│                                                        ▼                    │
+│                                     ┌─────────────────────────────────┐    │
+│                                     │  S3 Data Lake                  │    │
+│                                     │  zamora-trains/year=/month=/   │    │
+│                                     │  day=/YYYY-MM-DD.jsonl (1/día) │    │
+│                                     └────────┬────────────────────────┘    │
+│                                              │ S3 → EventBridge             │
+│                                              ▼                              │
+│                                     ┌─────────────────┐   ┌───────────────┐│
+│                                     │ Lambda          │──▶│  CloudWatch   ││
+│                                     │ delay-metrics   │   │  Dashboard +  ││
+│                                     └─────────────────┘   │  SNS Alarm    ││
+│                                              │             └───────────────┘│
+│                              ┌───────────────┴────────┐                     │
+│                              ▼                        ▼                     │
+│                     ┌────────────────┐      ┌──────────────────┐           │
+│                     │   Glue Table   │─────▶│     Athena       │           │
+│                     │ (sin Crawler)  │      │  (1 GB/query cap)│           │
+│                     └────────────────┘      └──────────────────┘           │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
+
+En el primer ciclo de polling de cada día, `train-tracker` siembra en
+DynamoDB un placeholder por cada tren programado hoy (`_seed_todays_trains`),
+antes incluso de que haya datos reales de Renfe — así el listado de trenes
+del día está disponible desde el primer momento, no solo a medida que cada
+uno se va capturando.
 
 ### Ventana de monitorización activa
 
@@ -166,8 +183,10 @@ El `deploy.sh` también lo ejecuta automáticamente y copia el resultado a
 
 ## Schema del Data Lake (S3 + Athena)
 
-Particionado Hive por `year / month / day`. Cada evento es un JSON de una línea en
-`s3://<bucket>/zamora-trains/year=YYYY/month=MM/day=DD/<cod>_<sentido>_<ts>.json`:
+Particionado Hive por `year / month / day`. Un único fichero JSONL por día
+(un tren entregado por línea), escrito una vez al día por `daily_dump_handler`:
+`s3://<bucket>/zamora-trains/year=YYYY/month=MM/day=DD/YYYY-MM-DD.jsonl`. Con
+Athena sin capa gratuita, menos objetos = menos overhead por consulta.
 
 ```json
 {
@@ -176,13 +195,9 @@ Particionado Hive por `year / month / day`. Cada evento es un JSON de una línea
   "sentido": "Madrid",
   "tipo_dia": "laborable",
   "dia_semana": "Friday",
-  "fecha_hora_evento": "2024-11-15T07:47:23+01:00",
   "hora_programada": "07:41",
-  "hora_real": "07:47",
-  "minutos_retraso": 6,
-  "cod_est_ant": "71801",
-  "ult_retraso_renfe": 6,
-  "capturado_en_zamora": true
+  "hora_llegada_corregida": "07:47",
+  "minutos_retraso": 6
 }
 ```
 
@@ -196,18 +211,23 @@ Particionado Hive por `year / month / day`. Cada evento es un JSON de una línea
   lifecycle (→ Standard-IA a 30 días, → Glacier-IR a 90). EventBridge habilitado
   para notificar nuevos objetos.
 - **DynamoDB `zamora-train-state`** — on-demand (PAY_PER_REQUEST), TTL hasta las
-  23:59:59 hora local (la tabla arranca vacía cada día),
-  Point-in-Time Recovery. Clave `pk = {cod}#{fecha}`, `sk = TRACKING`.
+  00:30 del día siguiente (margen tras el último ciclo de polling y antes del
+  volcado diario), Point-in-Time Recovery. Clave simple `pk = {cod}#{fecha}`.
 - **Lambda `train-tracker`** — arm64/Graviton2, Python 3.12, 256 MB, timeout 60s.
-  Disparada por EventBridge Scheduler `rate(5 minutes)`.
+  Disparada por EventBridge Scheduler `rate(5 minutes)`. Siembra los trenes
+  del día en el primer ciclo y actualiza su estado en DynamoDB; no escribe en S3.
+- **Lambda `daily-dump`** — arm64/Graviton2, Python 3.12. Disparada una vez al
+  día a las 00:15 (hora de Madrid). Escanea DynamoDB, coge los trenes del día
+  anterior marcados como `entregado` y escribe un único fichero JSONL en S3.
 - **Lambda `delay-metrics`** — disparada por EventBridge cuando se crea un objeto
-  en `zamora-trains/`. Publica métricas en el namespace CloudWatch `ZamoraTrains`
+  en `zamora-trains/`. Lee el JSONL del día (una línea por tren) y publica
+  métricas en el namespace CloudWatch `ZamoraTrains`
   (`TrainDelayMinutes`, `TrainPassage`, `TrainsWithDelay`).
 - **Glue Database + Table** — la tabla `zamora_trains` se define a mano en el
-  template (sin Crawler), con columnas que reflejan exactamente el JSON escrito
-  por `_record_passage()`. Las particiones se resuelven vía Partition Projection
-  (year/month/day), así que los datos nuevos aparecen en Athena sin ningún paso
-  adicional tras el despliegue.
+  template (sin Crawler), con columnas que reflejan exactamente el JSON que
+  escribe `daily_dump_handler()`. Las particiones se resuelven vía Partition
+  Projection (year/month/day), así que los datos nuevos aparecen en Athena
+  sin ningún paso adicional tras el despliegue.
 - **Athena Workgroup** — cap de 1 GB escaneado por query, resultados en el propio bucket.
 - **CloudWatch Dashboard** — retraso medio diario, trenes con retraso, invocaciones/errores.
 - **SNS + CloudWatch Alarm** (opcional) — alerta por email si un retraso supera 30 min.

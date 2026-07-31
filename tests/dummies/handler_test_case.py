@@ -28,5 +28,5 @@ class HandlerTestCase(unittest.TestCase):
         self.handler = handler
 
     def get_item(self, cod: str, fecha_iso: str):
-        resp = self.table.get_item(Key={"pk": f"{cod}#{fecha_iso}", "sk": "TRACKING"})
+        resp = self.table.get_item(Key={"pk": f"{cod}#{fecha_iso}"})
         return resp.get("Item")

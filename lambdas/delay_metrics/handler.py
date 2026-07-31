@@ -1,7 +1,8 @@
 """
 delay_metrics/handler.py
 Lambda disparada por EventBridge cuando se crea un nuevo objeto en S3.
-Lee el registro JSON y publica métricas de retraso en CloudWatch.
+Lee el volcado diario (JSONL: un tren entregado por línea) y publica
+métricas de retraso en CloudWatch, una tanda de datapoints por tren.
 """
 
 import json
@@ -16,6 +17,8 @@ cloudwatch = boto3.client("cloudwatch")
 s3 = boto3.client("s3")
 
 NAMESPACE = "ZamoraTrains"
+# Límite de la API PutMetricData: máximo 1000 MetricDatum por llamada.
+MAX_METRICS_PER_CALL = 1000
 
 
 def lambda_handler(event, context):
@@ -24,7 +27,7 @@ def lambda_handler(event, context):
     {
       "detail": {
         "bucket": {"name": "..."},
-        "object": {"key": "zamora-trains/year=.../...json"}
+        "object": {"key": "zamora-trains/year=.../....jsonl"}
       }
     }
     """
@@ -40,24 +43,35 @@ def lambda_handler(event, context):
     if not key.startswith("zamora-trains/"):
         return
 
-    # Leer el registro desde S3
+    # Leer el volcado diario (JSONL: un tren entregado por línea)
     try:
         response = s3.get_object(Bucket=bucket, Key=key)
-        record = json.loads(response["Body"].read().decode("utf-8"))
+        body = response["Body"].read().decode("utf-8")
     except Exception as exc:
         logger.error("Error leyendo %s/%s: %s", bucket, key, exc)
         return
 
-    delay_minutes = record.get("minutos_retraso", 0)
-    sentido = record.get("sentido", "Desconocido")
-    tipo_dia = record.get("tipo_dia", "Desconocido")
-    cod_comercial = record.get("cod_comercial", "UNKNOWN")
+    records = []
+    for line_num, line in enumerate(body.splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError as exc:
+            logger.error("Línea %d inválida en %s/%s: %s", line_num, bucket, key, exc)
 
-    logger.info("Tren %s | %s | retraso: %d min", cod_comercial, sentido, delay_minutes)
+    if not records:
+        logger.warning("Sin registros válidos en %s/%s", bucket, key)
+        return {"statusCode": 200, "published": 0}
 
-    # Publicar métricas
-    metric_data = [
-        {
+    metric_data = []
+    for record in records:
+        delay_minutes = record.get("minutos_retraso", 0)
+        sentido = record.get("sentido", "Desconocido")
+        tipo_dia = record.get("tipo_dia", "Desconocido")
+
+        metric_data.append({
             "MetricName": "TrainDelayMinutes",
             "Dimensions": [
                 {"Name": "Sentido", "Value": sentido},
@@ -65,32 +79,26 @@ def lambda_handler(event, context):
             ],
             "Value": float(delay_minutes),
             "Unit": "Count",
-        },
-        {
-            "MetricName": "TrainPassage",
-            "Dimensions": [
-                {"Name": "Sentido", "Value": sentido},
-            ],
-            "Value": 1.0,
-            "Unit": "Count",
-        },
-    ]
-
-    # Métrica adicional si hay retraso
-    if delay_minutes > 0:
+        })
         metric_data.append({
-            "MetricName": "TrainsWithDelay",
-            "Dimensions": [
-                {"Name": "Sentido", "Value": sentido},
-            ],
+            "MetricName": "TrainPassage",
+            "Dimensions": [{"Name": "Sentido", "Value": sentido}],
             "Value": 1.0,
             "Unit": "Count",
         })
+        if delay_minutes > 0:
+            metric_data.append({
+                "MetricName": "TrainsWithDelay",
+                "Dimensions": [{"Name": "Sentido", "Value": sentido}],
+                "Value": 1.0,
+                "Unit": "Count",
+            })
 
-    cloudwatch.put_metric_data(
-        Namespace=NAMESPACE,
-        MetricData=metric_data,
-    )
+    for i in range(0, len(metric_data), MAX_METRICS_PER_CALL):
+        cloudwatch.put_metric_data(
+            Namespace=NAMESPACE,
+            MetricData=metric_data[i:i + MAX_METRICS_PER_CALL],
+        )
 
-    logger.info("Métricas publicadas para %s", cod_comercial)
-    return {"statusCode": 200}
+    logger.info("Métricas publicadas para %d trenes (%s)", len(records), key)
+    return {"statusCode": 200, "published": len(records)}

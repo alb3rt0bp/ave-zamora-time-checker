@@ -61,16 +61,13 @@ class TestLambdaHandler(HandlerTestCase):
         # G100 (Galicia) ya capturado hoy → no aporta nada al procesar activos.
         self.table.put_item(Item={
             "pk": "M100#2026-01-05",
-            "sk": "TRACKING",
-            "done": False,
+            "entregado": False,
             "ult_retraso": 0,
-            "cod_est_ant": "10000",
             "capturado_en_zamora": True,
         })
         self.table.put_item(Item={
             "pk": "G100#2026-01-05",
-            "sk": "TRACKING",
-            "done": True,
+            "entregado": True,
         })
         frozen = make_frozen_datetime(_frozen_now(8, 41))
 
@@ -80,6 +77,21 @@ class TestLambdaHandler(HandlerTestCase):
             result = self.handler.lambda_handler({}, FakeContext())
 
         self.assertEqual(result["recorded"], 1)
+
+    def test_seeds_todays_trains_on_first_cycle(self):
+        # A las 05:00 no hay trenes activos, pero el sembrado (paso 0) debe
+        # haber creado los placeholders de M100 y G100 (laborable) igualmente.
+        frozen = make_frozen_datetime(_frozen_now(5, 0))
+
+        with patch("handler.datetime", frozen), patch("urllib.request.urlopen"):
+            self.handler.lambda_handler({}, FakeContext())
+
+        m100 = self.get_item("M100", "2026-01-05")
+        g100 = self.get_item("G100", "2026-01-05")
+        self.assertIsNotNone(m100)
+        self.assertIsNotNone(g100)
+        self.assertFalse(m100["entregado"])
+        self.assertFalse(g100["entregado"])
 
 
 if __name__ == "__main__":

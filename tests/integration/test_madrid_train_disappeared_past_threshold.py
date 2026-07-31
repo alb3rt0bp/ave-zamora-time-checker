@@ -28,15 +28,13 @@ class TestMadridTrainDisappearedPastThreshold(HandlerTestCase):
         # con 5 min de retraso conocido.
         self.table.put_item(Item={
             "pk": "M100#2026-01-05",
-            "sk": "TRACKING",
             "cod_comercial": "M100",
             "sentido": "Madrid",
             "tipo_dia": "laborable",
             "hora_programada": "08:30",
             "ult_retraso": 5,
-            "cod_est_ant": "30200",
             "capturado_en_zamora": True,
-            "done": False,
+            "entregado": False,
         })
 
         # Umbral de reintentos: 08:30 + 5 = 08:35. Ventana activa (matcher)
@@ -53,11 +51,11 @@ class TestMadridTrainDisappearedPastThreshold(HandlerTestCase):
         self.assertEqual(result["recorded"], 1)
 
         item = self.get_item("M100", "2026-01-05")
-        self.assertTrue(item["done"])
+        self.assertTrue(item["entregado"])
 
-        objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)["Contents"]
-        self.assertEqual(len(objects), 1)
-        self.assertIn("M100_Madrid", objects[0]["Key"])
+        # El polling ya no escribe a S3: eso lo hace daily_dump_handler.
+        objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)
+        self.assertNotIn("Contents", objects)
 
 
 if __name__ == "__main__":

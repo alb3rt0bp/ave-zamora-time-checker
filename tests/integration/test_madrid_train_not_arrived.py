@@ -37,7 +37,7 @@ class TestMadridTrainNotArrived(HandlerTestCase):
 
         item = self.get_item("M100", "2026-01-05")
         self.assertIsNotNone(item)
-        self.assertFalse(item["done"])
+        self.assertFalse(item["entregado"])
         self.assertTrue(item["capturado_en_zamora"])
         self.assertEqual(item["ult_retraso"], 5)
 

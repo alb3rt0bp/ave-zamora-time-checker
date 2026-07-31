@@ -10,17 +10,15 @@ from tests.dummies import aws_env  # noqa: F401 - fuerza el setup de entorno/sys
 
 
 def create_state_table():
-    """Crea la tabla DynamoDB de estado con el mismo esquema (pk/sk) que el template."""
+    """Crea la tabla DynamoDB de estado con el mismo esquema (clave simple pk) que el template."""
     dynamodb = boto3.resource("dynamodb", region_name=aws_env.AWS_REGION)
     table = dynamodb.create_table(
         TableName=aws_env.DYNAMODB_TABLE_NAME,
         AttributeDefinitions=[
             {"AttributeName": "pk", "AttributeType": "S"},
-            {"AttributeName": "sk", "AttributeType": "S"},
         ],
         KeySchema=[
             {"AttributeName": "pk", "KeyType": "HASH"},
-            {"AttributeName": "sk", "KeyType": "RANGE"},
         ],
         BillingMode="PAY_PER_REQUEST",
     )

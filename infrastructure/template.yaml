@@ -126,13 +126,9 @@ Resources:
       AttributeDefinitions:
         - AttributeName: pk          # "{cod_comercial}#{fecha}"  e.g. "04154#2024-11-15"
           AttributeType: S
-        - AttributeName: sk          # "TRACKING"
-          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
-        - AttributeName: sk
-          KeyType: RANGE
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true                # Los registros expiran automáticamente tras 24h
@@ -147,11 +143,10 @@ Resources:
       CodeUri: ../lambdas/train_tracker/
       Handler: handler.lambda_handler
       Description: >
-        Ejecutada cada 5 minutos. Consulta flotaLD.json de Renfe y registra
-        los pasos por Zamora en el Data Lake S3.
+        Ejecutada cada 5 minutos. Consulta flotaLD.json de Renfe y actualiza
+        el estado de cada tren en DynamoDB. No escribe en S3 directamente:
+        el volcado a S3 lo hace DailyDumpFunction una vez al día.
       Policies:
-        - S3WritePolicy:
-            BucketName: !Ref DatalakeBucket
         - DynamoDBCrudPolicy:
             TableName: !Ref TrainStateTable
         - CloudWatchPutMetricPolicy: {}
@@ -179,6 +174,36 @@ Resources:
             FlexibleTimeWindow:
               Mode: "OFF"
             Description: "Polling cada 5 minutos entre las 23:00 y las 23:30 (hora de Madrid)"
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  # ── Lambda: Volcado diario a S3 ──────────────────────────────────────────────
+  DailyDumpFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-daily-dump-${Environment}"
+      CodeUri: ../lambdas/train_tracker/
+      Handler: handler.daily_dump_handler
+      Description: >
+        Ejecutada una vez al día a las 00:15 (hora de Madrid). Lee de
+        DynamoDB los trenes del día anterior marcados como entregados y
+        escribe un único fichero JSONL en el Data Lake S3.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrainStateTable
+        - S3WritePolicy:
+            BucketName: !Ref DatalakeBucket
+      Events:
+        DailyDumpSchedule:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub "zamora-daily-dump-${Environment}"
+            ScheduleExpression: "cron(15 0 * * ? *)"
+            ScheduleExpressionTimezone: "Europe/Madrid"
+            FlexibleTimeWindow:
+              Mode: "OFF"
+            Description: "Volcado diario a S3, 00:15 hora de Madrid (el TTL de DynamoDB expira a las 00:30)"
       Tags:
         Project: ZamoraTrainObservability
         Environment: !Ref Environment
@@ -248,7 +273,7 @@ Resources:
         Description: "Data Lake de puntualidad de trenes en Zamora"
 
   # Tabla definida a mano (sin Crawler): las columnas deben coincidir
-  # exactamente con las claves del JSON que escribe _record_passage() en
+  # exactamente con las claves del JSON que escribe daily_dump_handler() en
   # handler.py. Las particiones (year/month/day) se resuelven mediante
   # Partition Projection, así que tampoco hace falta ALTER TABLE ADD PARTITION
   # ni ejecutar nada tras cada despliegue para que Athena vea los datos nuevos.
@@ -290,8 +315,8 @@ Resources:
             Parameters:
               "ignore.malformed.json": "true"
           Columns:
-            # Debe reflejar exactamente el dict `record` de _record_passage()
-            # en lambdas/train_tracker/handler.py.
+            # Debe reflejar exactamente el dict `record` que construye
+            # daily_dump_handler() en lambdas/train_tracker/handler.py.
             - Name: event_id
               Type: string
             - Name: cod_comercial
@@ -302,22 +327,12 @@ Resources:
               Type: string
             - Name: dia_semana
               Type: string
-            - Name: fecha_hora_evento
-              Type: string
             - Name: hora_programada
               Type: string
-            - Name: hora_real
+            - Name: hora_llegada_corregida
               Type: string
             - Name: minutos_retraso
               Type: int
-            - Name: cod_est_ant
-              Type: string
-            - Name: cod_est_sig
-              Type: string
-            - Name: ult_retraso_renfe
-              Type: int
-            - Name: capturado_en_zamora
-              Type: boolean
 
   # ── Athena: Workgroup ─────────────────────────────────────────────────────
   AthenaWorkgroup:
