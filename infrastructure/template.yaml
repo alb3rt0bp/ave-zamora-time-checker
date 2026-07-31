@@ -50,6 +50,14 @@ Parameters:
     Default: ""
     Description: Email para alertas de retrasos (opcional)
 
+  DelayAlertThresholdMinutes:
+    Type: Number
+    Default: 15
+    MinValue: 1
+    Description: >
+      Umbral de retraso (minutos) a partir del cual, al marcarse un tren
+      como entregado, se publica un tuit automático.
+
   GlueDatabaseName:
     Type: String
     Default: zamora_trains_db
@@ -146,10 +154,16 @@ Resources:
         Ejecutada cada 5 minutos. Consulta flotaLD.json de Renfe y actualiza
         el estado de cada tren en DynamoDB. No escribe en S3 directamente:
         el volcado a S3 lo hace DailyDumpFunction una vez al día.
+      Environment:
+        Variables:
+          DELAY_ALERT_SNS_TOPIC_ARN: !Ref DelayTweetTopic
+          DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrainStateTable
         - CloudWatchPutMetricPolicy: {}
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt DelayTweetTopic.TopicName
       Events:
         # Cron no admite un patrón de minutos distinto por hora en una sola
         # expresión, así que el tramo 07:00–23:30 se cubre con dos schedules:
@@ -204,6 +218,53 @@ Resources:
             FlexibleTimeWindow:
               Mode: "OFF"
             Description: "Volcado diario a S3, 00:15 hora de Madrid (el TTL de DynamoDB expira a las 00:30)"
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  # ── Tuit automático de retrasos ─────────────────────────────────────────────
+  # SNS desacopla la publicación del tuit del ciclo de polling: un fallo o
+  # lentitud de la API de X no debe bloquear ni retrasar TrainTrackerFunction.
+  DelayTweetTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "zamora-trains-delay-tweet-${Environment}"
+
+  # Placeholder: las credenciales OAuth1.0a reales (consumer_key,
+  # consumer_secret, access_token, access_token_secret) de la X Developer
+  # App se rellenan a mano tras el despliegue (consola/CLI) — nunca en el
+  # template.
+  XApiCredentialsSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "zamora-trains-x-api-credentials-${Environment}"
+      Description: "Credenciales OAuth1.0a de la X Developer App (rellenar a mano tras el despliegue)"
+      SecretString: >-
+        {"consumer_key":"","consumer_secret":"","access_token":"","access_token_secret":""}
+
+  TweetNotifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-tweet-notifier-${Environment}"
+      CodeUri: ../lambdas/tweet_notifier/
+      Handler: handler.lambda_handler
+      Description: >
+        Disparada por DelayTweetTopic cuando un tren se marca entregado con
+        más de DelayAlertThresholdMinutes minutos de retraso. Publica un
+        tuit en la cuenta de la asociación vía la API de X.
+      Environment:
+        Variables:
+          X_API_CREDENTIALS_SECRET_ARN: !Ref XApiCredentialsSecret
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource: !Ref XApiCredentialsSecret
+      Events:
+        DelayTweetSubscription:
+          Type: SNS
+          Properties:
+            Topic: !Ref DelayTweetTopic
       Tags:
         Project: ZamoraTrainObservability
         Environment: !Ref Environment
@@ -430,3 +491,9 @@ Outputs:
   DashboardURL:
     Description: "URL del CloudWatch Dashboard"
     Value: !Sub "https://${AwsRegion}.console.aws.amazon.com/cloudwatch/home#dashboards:name=ZamoraTrains-${Environment}"
+
+  XApiCredentialsSecretName:
+    Description: >
+      Nombre del secret en Secrets Manager donde rellenar a mano las
+      credenciales OAuth1.0a de la X Developer App tras el despliegue.
+    Value: !Ref XApiCredentialsSecret

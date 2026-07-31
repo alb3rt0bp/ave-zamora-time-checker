@@ -55,10 +55,13 @@ DYNAMODB_TABLE  = os.environ["DYNAMODB_STATE_TABLE"]
 SCHEDULES_FILE  = os.environ.get("SCHEDULES_FILE", "/var/task/train_schedules.json")
 ZAMORA_CODE     = os.environ.get("ZAMORA_STATION_CODE", "30200")
 CHAMARTIN_CODE  = os.environ.get("CHAMARTIN_STATION_CODE", "17000")
+DELAY_ALERT_SNS_TOPIC_ARN     = os.environ.get("DELAY_ALERT_SNS_TOPIC_ARN", "")
+DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
 
 # ── Clientes AWS ──────────────────────────────────────────────────────────────
 dynamodb = boto3.resource("dynamodb")
 s3       = boto3.client("s3")
+sns      = boto3.client("sns")
 
 with open(SCHEDULES_FILE, "r", encoding="utf-8") as fh:
     schedules_config = json.load(fh)
@@ -240,6 +243,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
             capturado_en_zamora=True,
             ult_retraso=ult_retraso,
         )
+        _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, now_local, log_extra)
         logger.info("✅ Tren %s (Galicia) entregado, retraso=%d min", cod, ult_retraso, extra=log_extra)
         return True
 
@@ -312,6 +316,9 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
             # No hay datos en vivo; el estado conocido ya tiene ult_retraso y
             # hora_llegada_corregida correctos de la última _update_state.
             _mark_done(cod, now_local)
+            _maybe_publish_delay_alert(
+                scheduled, ult_retraso_conocido, state.get("hora_llegada_corregida"), now_local, log_extra
+            )
             logger.info(
                 "Tren %s (Madrid) desaparecido de la flota tras ser visto → "
                 "llegada a Chamartín registrada", cod, extra=log_extra
@@ -344,6 +351,7 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
             capturado_en_zamora=capturado_en_zamora,
             ult_retraso=ult_retraso,
         )
+        _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, now_local, log_extra)
         logger.info("Tren %s ha llegado a Chamartín (codEstAnt=%s)", cod, cod_est_ant, extra=log_extra)
         return True
 
@@ -440,6 +448,43 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None
         ExpressionAttributeNames=names,
         ExpressionAttributeValues=values,
     )
+
+
+def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
+                                hora_llegada_corregida: str | None,
+                                now_local: datetime, log_extra: dict) -> None:
+    """
+    Publica un evento en SNS cuando un tren se acaba de marcar entregado con
+    más de DELAY_ALERT_THRESHOLD_MINUTES minutos de retraso, para que
+    tweet_notifier lo recoja y publique el tuit correspondiente. Desacoplado
+    vía SNS para que un fallo/lentitud de la API de X no afecte al ciclo de
+    polling. Un fallo al publicar se loguea pero no debe tirar la Lambda: el
+    tren ya ha quedado grabado como entregado antes de esta llamada.
+    """
+    if ult_retraso <= DELAY_ALERT_THRESHOLD_MINUTES:
+        return
+
+    try:
+        sns.publish(
+            TopicArn=DELAY_ALERT_SNS_TOPIC_ARN,
+            Message=json.dumps({
+                "cod_comercial": scheduled["cod_comercial"],
+                "sentido": scheduled["sentido"],
+                "hora_programada": scheduled["hora_llegada_destino"],
+                "hora_llegada_corregida": hora_llegada_corregida,
+                "minutos_retraso": ult_retraso,
+                "fecha": now_local.date().isoformat(),
+            }),
+        )
+        logger.info(
+            "Alerta de retraso publicada en SNS para %s (retraso=%d min)",
+            scheduled["cod_comercial"], ult_retraso, extra=log_extra
+        )
+    except Exception as exc:
+        logger.error(
+            "Error publicando alerta de retraso en SNS para %s: %s",
+            scheduled["cod_comercial"], exc, extra=log_extra
+        )
 
 
 def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict) -> int:

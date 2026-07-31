@@ -1,0 +1,2 @@
+# Lambda runtime ya incluye boto3. x_client.py usa solo librería estándar
+# (hmac/hashlib/urllib) para la firma OAuth1.0a — sin tweepy/requests.

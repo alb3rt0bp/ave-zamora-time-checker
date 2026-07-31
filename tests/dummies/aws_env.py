@@ -35,6 +35,11 @@ os.environ.setdefault(
 )
 os.environ.setdefault("ZAMORA_STATION_CODE", "30200")
 os.environ.setdefault("CHAMARTIN_STATION_CODE", "17000")
+os.environ.setdefault(
+    "DELAY_ALERT_SNS_TOPIC_ARN",
+    f"arn:aws:sns:{os.environ['AWS_DEFAULT_REGION']}:123456789012:test-zamora-delay-tweet",
+)
+os.environ.setdefault("DELAY_ALERT_THRESHOLD_MINUTES", "15")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
 AWS_REGION = os.environ["AWS_DEFAULT_REGION"]
@@ -42,3 +47,5 @@ DYNAMODB_TABLE_NAME = os.environ["DYNAMODB_STATE_TABLE"]
 S3_BUCKET_NAME = os.environ["DATALAKE_S3_BUCKET"]
 ZAMORA_CODE = os.environ["ZAMORA_STATION_CODE"]
 CHAMARTIN_CODE = os.environ["CHAMARTIN_STATION_CODE"]
+DELAY_ALERT_SNS_TOPIC_ARN = os.environ["DELAY_ALERT_SNS_TOPIC_ARN"]
+DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ["DELAY_ALERT_THRESHOLD_MINUTES"])

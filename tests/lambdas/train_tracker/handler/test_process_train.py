@@ -5,7 +5,11 @@ from zoneinfo import ZoneInfo
 from tests.dummies.handler_test_case import HandlerTestCase
 from tests.dummies.log_extra import SAMPLE_LOG_EXTRA
 from tests.dummies.reference_dates import MONDAY
-from tests.dummies.renfe_samples import TRAIN_G100_EN_RUTA, TRAIN_G100_EN_ZAMORA
+from tests.dummies.renfe_samples import (
+    TRAIN_G100_EN_RUTA,
+    TRAIN_G100_EN_ZAMORA,
+    TRAIN_G100_EN_ZAMORA_CON_RETRASO,
+)
 
 TZ = ZoneInfo("Europe/Madrid")
 NOW = datetime(MONDAY.year, MONDAY.month, MONDAY.day, 8, 10, tzinfo=TZ)
@@ -63,6 +67,19 @@ class TestProcessTrain(HandlerTestCase):
         # El polling ya no escribe a S3: eso lo hace daily_dump_handler.
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)
         self.assertNotIn("Contents", objects)
+
+    def test_galicia_arrival_with_low_delay_does_not_publish_alert(self):
+        # TRAIN_G100_EN_ZAMORA trae ultRetraso=4, por debajo del umbral (15).
+        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, NOW, SAMPLE_LOG_EXTRA)
+
+        self.assertEqual(self.get_published_delay_alerts(), [])
+
+    def test_galicia_arrival_with_high_delay_publishes_alert(self):
+        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA_CON_RETRASO, NOW, SAMPLE_LOG_EXTRA)
+
+        [alert] = self.get_published_delay_alerts()
+        self.assertEqual(alert["cod_comercial"], "G100")
+        self.assertEqual(alert["minutos_retraso"], TRAIN_G100_EN_ZAMORA_CON_RETRASO["ultRetraso"])
 
     def test_galicia_ult_retraso_stays_consistent_with_hora_llegada_corregida_across_cycles(self):
         # Regresión: un ciclo anterior deja ult_retraso=2 en Dynamo (vía

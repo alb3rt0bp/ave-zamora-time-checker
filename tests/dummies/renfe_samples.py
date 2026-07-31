@@ -55,6 +55,19 @@ TRAIN_G100_EN_ZAMORA = {
     "lon": -5.7447,
 }
 
+# Tren G100 acaba de pasar por Zamora con un retraso importante (> 15 min),
+# para probar la alerta de retraso en SNS (_maybe_publish_delay_alert).
+TRAIN_G100_EN_ZAMORA_CON_RETRASO = {
+    **TRAIN_G100_EN_ZAMORA,
+    "ultRetraso": 20,
+}
+
+# Tren M100 acaba de llegar a Chamartín con un retraso importante (> 15 min).
+TRAIN_M100_EN_CHAMARTIN_CON_RETRASO = {
+    **TRAIN_M100_EN_CHAMARTIN,
+    "ultRetraso": 30,
+}
+
 FLOTA_RESPONSE_SAMPLE = [TRAIN_M100_EN_RUTA, TRAIN_G100_EN_RUTA]
 
 TRENES_CON_ESTACIONES_SAMPLE = {

@@ -34,3 +34,24 @@ def create_datalake_bucket():
         CreateBucketConfiguration={"LocationConstraint": aws_env.AWS_REGION},
     )
     return s3
+
+
+def create_delay_topic():
+    """
+    Crea el topic SNS de alertas de retraso (mismo ARN que espera
+    aws_env.DELAY_ALERT_SNS_TOPIC_ARN) con una cola SQS suscrita, para que
+    los tests puedan leer los mensajes que handler.py publica.
+    """
+    sns = boto3.client("sns", region_name=aws_env.AWS_REGION)
+    sqs = boto3.client("sqs", region_name=aws_env.AWS_REGION)
+
+    topic_name = aws_env.DELAY_ALERT_SNS_TOPIC_ARN.rsplit(":", 1)[-1]
+    topic_arn = sns.create_topic(Name=topic_name)["TopicArn"]
+
+    queue_url = sqs.create_queue(QueueName=f"{topic_name}-test-queue")["QueueUrl"]
+    queue_arn = sqs.get_queue_attributes(
+        QueueUrl=queue_url, AttributeNames=["QueueArn"]
+    )["Attributes"]["QueueArn"]
+    sns.subscribe(TopicArn=topic_arn, Protocol="sqs", Endpoint=queue_arn)
+
+    return sns, sqs, topic_arn, queue_url
