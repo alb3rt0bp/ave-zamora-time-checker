@@ -59,14 +59,24 @@ class TestGaliciaTrainPassedZamora(HandlerTestCase):
         with patch("handler.datetime", frozen_dump):
             dump_result = self.handler.daily_dump_handler({}, FakeContext())
 
-        self.assertEqual(dump_result["written"], 1)
+        # El fixture siembra M100 (Madrid) y G100 (Galicia) para el lunes.
+        # Solo G100 se capturó en este escenario; M100 se vuelca igualmente,
+        # pero como cancelado (nunca visto en flotaLD.json en todo el día).
+        self.assertEqual(dump_result["written"], 2)
         body = self.s3.get_object(Bucket=self.handler.S3_BUCKET, Key=dump_result["key"])["Body"].read()
-        record = json.loads(body.decode("utf-8").strip())
-        self.assertEqual(record["cod_comercial"], "G100")
+        records = {r["cod_comercial"]: r for r in
+                   (json.loads(line) for line in body.decode("utf-8").splitlines())}
+
+        record = records["G100"]
         self.assertEqual(record["sentido"], "Galicia")
         self.assertEqual(record["minutos_retraso"], 4)
+        self.assertFalse(record["cancelado"])
         self.assertNotIn("capturado_en_zamora", record)
         self.assertNotIn("cod_est_ant", record)
+
+        cancelled = records["M100"]
+        self.assertTrue(cancelled["cancelado"])
+        self.assertIsNone(cancelled["minutos_retraso"])
 
 
 if __name__ == "__main__":

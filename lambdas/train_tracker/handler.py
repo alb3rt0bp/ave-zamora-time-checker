@@ -23,11 +23,16 @@ lambda_handler se ejecuta cada 5 minutos por EventBridge Scheduler:
 
 daily_dump_handler se ejecuta una vez al día a las 00:15 (hora de Madrid),
 poco después de medianoche: vuelca a un único fichero JSONL en S3 todos los
-trenes del día que acaba de terminar marcados como 'entregado' en DynamoDB
-(cuyo TTL no expira hasta las 00:30, dejando margen de sobra). No hay
-escritura a S3 durante el polling — todo el estado vive en DynamoDB hasta
-el volcado diario, para minimizar el número de objetos que Athena tiene
-que leer (sin capa gratuita de consultas).
+trenes programados el día que acaba de terminar (sembrados por
+_seed_todays_trains), leyendo su estado en DynamoDB (cuyo TTL no expira
+hasta las 00:30, dejando margen de sobra). Los trenes que nunca se marcaron
+'entregado' (nunca detectados en flotaLD.json — p. ej. cancelación por
+huelga) se vuelcan igualmente, marcados con 'cancelado': true y
+'minutos_retraso': null, para que consten en la observabilidad sin
+contaminar medias/estadísticas de retraso (NULL se ignora en AVG() y
+similares). No hay escritura a S3 durante el polling — todo el estado vive
+en DynamoDB hasta el volcado diario, para minimizar el número de objetos
+que Athena tiene que leer (sin capa gratuita de consultas).
 """
 
 import json
@@ -444,6 +449,15 @@ def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict) -> int:
     ya se ha cerrado sin haber sido detectados como llegados (ni Chamartín ni
     desaparición), y los marca igualmente como entregados con los últimos
     datos conocidos para no perder el dato de puntualidad de ese tren ese día.
+
+    Excepción: si el tren nunca se llegó a ver en flotaLD.json en todo el día
+    (capturado_en_zamora sigue en False, tal y como lo deja el placeholder de
+    _seed_todays_trains), no se fuerza la entrega. Forzarla dejaría un
+    registro con ult_retraso=0 como si el tren hubiese circulado puntual,
+    cuando en realidad no hay ninguna evidencia de que haya circulado (p. ej.
+    cancelación por huelga) — contaminaría el Data Lake con falsos positivos.
+    Se deja el item con entregado=False: el filtro de daily_dump_handler ya lo
+    excluye del volcado, y el TTL lo limpia solo.
     """
     resolved = 0
     for train in schedules_config["trains"]:
@@ -463,6 +477,13 @@ def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict) -> int:
         if now_local <= window_end:
             continue  # todavía dentro de ventana, se resolverá por el flujo normal
 
+        if not state.get("capturado_en_zamora", False):
+            logger.warning(
+                "Tren %s (Madrid) ventana cerrada sin haberse visto nunca en flotaLD.json "
+                "(¿cancelación/huelga?) → no se marca como entregado", cod, extra=log_extra
+            )
+            continue
+
         # El estado ya tiene ult_retraso y hora_llegada_corregida correctos
         # de la última _update_state; basta con marcarlo como entregado.
         _mark_done(cod, now_local)
@@ -480,8 +501,15 @@ def daily_dump_handler(event, context):
     Lambda de volcado diario. Se ejecuta poco después de medianoche (hora de
     Madrid), tras el último ciclo de polling del día anterior y antes de que
     el TTL de DynamoDB (00:30) pueda barrer sus datos. Lee de DynamoDB todos
-    los trenes del día que acaba de terminar marcados como 'entregado' y los
-    escribe en un único fichero JSONL en S3.
+    los trenes programados el día que acaba de terminar (sembrados por
+    _seed_todays_trains, que crea un item por cada uno) y los escribe en un
+    único fichero JSONL en S3.
+
+    Un tren que nunca llegó a marcarse 'entregado' (nunca detectado en
+    flotaLD.json en todo el día) se vuelca igualmente como 'cancelado': true,
+    con 'minutos_retraso'/'hora_llegada_corregida' a null — no hay dato real
+    de retraso que reportar, y forzar un valor (p. ej. 0) contaminaría medias
+    y estadísticas como si el tren hubiese circulado puntual.
     """
     log_extra = {'span_id': context.aws_request_id}
 
@@ -494,13 +522,14 @@ def daily_dump_handler(event, context):
     logger.info("Volcado diario iniciado para %s", target_date_iso, extra=log_extra)
 
     records = []
-    scan_kwargs = {"FilterExpression": "attribute_exists(cod_comercial) AND entregado = :true",
-                    "ExpressionAttributeValues": {":true": True}}
+    scan_kwargs = {"FilterExpression": "attribute_exists(cod_comercial)"}
     while True:
         resp = state_table.scan(**scan_kwargs)
         for item in resp.get("Items", []):
             if not item["pk"].endswith(f"#{target_date_iso}"):
                 continue  # de otro día
+
+            entregado = bool(item.get("entregado"))
             records.append({
                 "event_id": f"{item['cod_comercial']}-{target_date_iso}T{item['hora_programada']}",
                 "cod_comercial": item["cod_comercial"],
@@ -508,15 +537,16 @@ def daily_dump_handler(event, context):
                 "tipo_dia": item["tipo_dia"],
                 "dia_semana": target_date.strftime("%A"),
                 "hora_programada": item["hora_programada"],
-                "hora_llegada_corregida": item.get("hora_llegada_corregida"),
-                "minutos_retraso": int(item.get("ult_retraso", 0)),
+                "hora_llegada_corregida": item.get("hora_llegada_corregida") if entregado else None,
+                "minutos_retraso": int(item.get("ult_retraso", 0)) if entregado else None,
+                "cancelado": not entregado,
             })
         if "LastEvaluatedKey" not in resp:
             break
         scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
 
     if not records:
-        logger.info("Sin trenes entregados el %s; no se escribe fichero.", target_date_iso, extra=log_extra)
+        logger.info("Ningún tren programado el %s; no se escribe fichero.", target_date_iso, extra=log_extra)
         return {"statusCode": 200, "written": 0}
 
     writer = DatalakeWriter(s3, S3_BUCKET, log_extra)

@@ -333,6 +333,8 @@ Resources:
               Type: string
             - Name: minutos_retraso
               Type: int
+            - Name: cancelado
+              Type: boolean
 
   # ── Athena: Workgroup ─────────────────────────────────────────────────────
   AthenaWorkgroup:

@@ -67,9 +67,21 @@ def lambda_handler(event, context):
 
     metric_data = []
     for record in records:
-        delay_minutes = record.get("minutos_retraso", 0)
         sentido = record.get("sentido", "Desconocido")
         tipo_dia = record.get("tipo_dia", "Desconocido")
+
+        if record.get("cancelado"):
+            # Sin dato real de retraso: se cuenta como cancelación en vez de
+            # publicarse en TrainDelayMinutes (evitaría contaminar la media).
+            metric_data.append({
+                "MetricName": "TrainsCancelled",
+                "Dimensions": [{"Name": "Sentido", "Value": sentido}],
+                "Value": 1.0,
+                "Unit": "Count",
+            })
+            continue
+
+        delay_minutes = record.get("minutos_retraso", 0)
 
         metric_data.append({
             "MetricName": "TrainDelayMinutes",

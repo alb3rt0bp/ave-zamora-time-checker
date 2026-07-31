@@ -63,6 +63,18 @@ class TestResolveExpiredMadridTrains(HandlerTestCase):
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)
         self.assertNotIn("Contents", objects)
 
+    def test_past_window_never_seen_is_not_forced_entregado(self):
+        # Tren nunca visto en flotaLD.json (p. ej. cancelado por huelga): el
+        # placeholder de _seed_todays_trains deja capturado_en_zamora=False,
+        # y así se queda si nunca hay datos reales de Renfe.
+        self._put_state("M100", _at(8, 48), capturado_en_zamora=False)
+
+        resolved = self.handler._resolve_expired_madrid_trains(_at(8, 48), SAMPLE_LOG_EXTRA)
+
+        self.assertEqual(resolved, 0)
+        item = self.get_item("M100", _at(8, 48).date().isoformat())
+        self.assertFalse(item["entregado"])
+
     def test_galicia_trains_are_never_touched(self):
         self._put_state("G100", _at(23, 0))  # sentido Galicia en el fixture
 
