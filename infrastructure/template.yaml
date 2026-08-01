@@ -297,6 +297,100 @@ Resources:
                   key:
                     - prefix: "zamora-trains/"
 
+  # ── API HTTP: lectura de trenes ────────────────────────────────────────────
+  # HttpApi explícito (en vez de un API implícito por función) para que
+  # futuras rutas de solo lectura (métricas Athena, sugerencias de corrección)
+  # puedan colgarse del mismo API Gateway sin volver a aprovisionar nada.
+  TrainsApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Environment
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+        AllowHeaders:
+          - "*"
+
+  GetTodayTrainsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-get-today-trains-${Environment}"
+      CodeUri: ../lambdas/api/
+      Handler: handler.get_today_handler
+      Description: >
+        API de solo lectura: devuelve los trenes de hoy desde DynamoDB
+        (datos en vivo/parciales del día en curso).
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrainStateTable
+      Events:
+        GetTodayApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrainsApi
+            Path: /trains/today
+            Method: GET
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  GetDayTrainsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-get-day-trains-${Environment}"
+      CodeUri: ../lambdas/api/
+      Handler: handler.get_day_handler
+      Description: >
+        API de solo lectura: devuelve los trenes de un día pasado desde el
+        fichero JSONL del Data Lake en S3. Devuelve 404 si ese día aún no se
+        ha volcado.
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref DatalakeBucket
+      Events:
+        GetDayApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrainsApi
+            Path: /trains/{date}
+            Method: GET
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  # ── Frontend: hosting estático ──────────────────────────────────────────────
+  # Sin CloudFront por ahora (decisión explícita para simplicidad en esta
+  # alpha): se sirve directamente vía el endpoint de website hosting de S3.
+  # Contenido público, no sensible (retrasos de trenes). A diferencia de
+  # DatalakeBucket, este bucket se deja deliberadamente público.
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "zamora-trains-frontend-${Environment}-${AWS::AccountId}"
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html   # SPA fallback: cualquier ruta desconocida sirve index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+
   # ── CloudWatch: Alarma de retrasos grandes ──────────────────────────────────
   HighDelayAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -497,3 +591,15 @@ Outputs:
       Nombre del secret en Secrets Manager donde rellenar a mano las
       credenciales OAuth1.0a de la X Developer App tras el despliegue.
     Value: !Ref XApiCredentialsSecret
+
+  TrainsApiBaseUrl:
+    Description: "URL base del API HTTP de trenes (usar como VITE_API_BASE_URL)"
+    Value: !Sub "https://${TrainsApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
+
+  FrontendBucketName:
+    Description: "Bucket S3 del frontend estático"
+    Value: !Ref FrontendBucket
+
+  FrontendWebsiteUrl:
+    Description: "URL del sitio estático (S3 website hosting, sin CloudFront)"
+    Value: !GetAtt FrontendBucket.WebsiteURL

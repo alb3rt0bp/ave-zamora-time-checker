@@ -1,0 +1,3 @@
+# Lambda runtime ya incluye boto3 — solo listamos dependencias externas.
+# Para la zoneinfo (Python 3.9+ con tzdata en Lambda):
+tzdata>=2024.1

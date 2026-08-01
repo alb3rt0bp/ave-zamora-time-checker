@@ -128,7 +128,8 @@ ave-zamora-time-checker/
 │   └── trenes_vuelta_madrid_{laborable,sabado,domingo}.csv
 ├── infrastructure/
 │   ├── template.yaml                  # SAM / CloudFormation (stack de la app)
-│   ├── deploy.sh                       # Despliegue con sam build + sam deploy
+│   ├── deploy.sh                       # Despliegue del backend (sam build + sam deploy)
+│   ├── deploy_frontend.sh             # Build + sync del frontend al bucket S3
 │   └── github-oidc-role.yaml          # Rol IAM para GitHub Actions (one-shot)
 ├── lambdas/
 │   ├── train_tracker/
@@ -137,13 +138,25 @@ ave-zamora-time-checker/
 │   │   ├── schedule_matcher.py        # Lógica de ventana de monitorización activa
 │   │   ├── datalake_writer.py         # Escritura S3 con particionado Hive
 │   │   └── requirements.txt           # Solo tzdata (boto3 va en el runtime)
-│   └── delay_metrics/
-│       └── handler.py                 # Publica métricas de retraso en CloudWatch
+│   ├── delay_metrics/
+│   │   └── handler.py                 # Publica métricas de retraso en CloudWatch
+│   └── api/
+│       └── handler.py                 # API HTTP solo lectura: get_today_handler / get_day_handler
+├── frontend/                          # Frontend Vite + React + TypeScript
+│   ├── src/
+│   │   ├── api.ts                     # Cliente HTTP: fetchToday() / fetchByDate()
+│   │   ├── types.ts                   # Tipos TodayTrain / DayTrain / TrainRow
+│   │   ├── App.tsx                    # Selector de fecha + vista de hoy / día pasado
+│   │   ├── components/                # TrainTable, DatePicker, TodayView, DayView
+│   │   ├── utils/                     # formatDelay, yesterdayMadrid, normalizeTrain
+│   │   └── mocks/                     # Handlers MSW usados en los tests
+│   ├── package.json
+│   └── vite.config.ts                 # Config de Vite + Vitest (tests y cobertura)
 ├── scripts/
 │   ├── compile_schedules.py           # CSVs → config/train_schedules.json
 │   └── query_examples.sql             # Queries Athena de ejemplo
 └── .github/workflows/
-    └── deploy.yml                     # CI/CD: deploy automático a AWS
+    └── deploy.yml                     # CI/CD: deploy automático del backend a AWS
 ```
 
 ---
@@ -232,6 +245,16 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
 - **CloudWatch Dashboard** — retraso medio diario, trenes con retraso, invocaciones/errores.
 - **SNS + CloudWatch Alarm** (opcional) — alerta por email si un retraso supera 30 min.
   Solo se crea si se pasa `AlertEmailAddress`.
+- **API HTTP `TrainsApi`** (API Gateway HttpApi, CORS abierto) — dos Lambdas de solo
+  lectura sobre el mismo API, pensado para colgar aquí futuras rutas (métricas Athena,
+  sugerencias de corrección) sin volver a aprovisionar nada:
+  - **`GET /trains/today`** (`GetTodayTrainsFunction`) — escanea DynamoDB y devuelve
+    los trenes de hoy (datos en vivo/parciales del día en curso).
+  - **`GET /trains/{date}`** (`GetDayTrainsFunction`) — lee el JSONL de un día pasado
+    desde el Data Lake en S3; devuelve 404 si ese día aún no se ha volcado.
+- **`FrontendBucket`** — bucket S3 con website hosting habilitado (`index.html` como
+  index y error document, para el fallback de la SPA) y lectura pública, para servir
+  el frontend estático sin CloudFront por ahora.
 
 ### Variables de entorno / parámetros
 
@@ -261,31 +284,67 @@ un identificador interno distinto del público:
 
 ## Despliegue
 
+El despliegue tiene dos partes independientes: primero el backend (stack SAM
+completo, incluye la API HTTP y el bucket del frontend), y después el frontend
+(build estático sincronizado a ese bucket). El frontend **no puede desplegarse
+sin que el backend ya exista** — necesita leer la URL del API y el nombre del
+bucket de los outputs del stack.
+
 ### 1. Rol de despliegue (una sola vez por cuenta)
 
 `infrastructure/github-oidc-role.yaml` crea el proveedor OIDC de GitHub y el rol
 `github-actions-zamora-trains-deploy`. Desplegarlo manualmente una vez y configurar su
 ARN como secret `AWS_DEPLOY_ROLE_ARN` en los *environments* `dev`/`prod` de GitHub.
 
-### 2. Despliegue manual
+### 2. Despliegue del backend
 
 ```bash
 ./infrastructure/deploy.sh dev
 ./infrastructure/deploy.sh prod --alert-email tu@email.com
 ```
 
+Requisitos: `aws-cli` v2, `sam-cli`, Python 3.12, permisos de despliegue en AWS.
+
 El script compila los horarios, crea el bucket de artefactos SAM, hace `sam build`
-(en contenedor) + `sam deploy`, y muestra los outputs. La tabla Athena queda
-lista para consultar inmediatamente, sin pasos adicionales.
+(en contenedor) + `sam deploy`, y muestra los outputs — incluidos `TrainsApiBaseUrl`,
+`FrontendBucketName` y `FrontendWebsiteUrl`, que necesita el paso siguiente. La tabla
+Athena queda lista para consultar inmediatamente, sin pasos adicionales.
 Región por defecto: `eu-south-2` (España).
 
-### 3. CI/CD (GitHub Actions)
+### 3. Despliegue del frontend
 
-`.github/workflows/deploy.yml` despliega automáticamente en cada push, autenticándose
-vía OIDC (sin claves de larga duración):
+```bash
+./infrastructure/deploy_frontend.sh dev
+```
+
+Requisitos: `aws-cli` v2, Node.js/npm (instalar con [nvm](https://github.com/nvm-sh/nvm)
+o Homebrew). Debe ejecutarse **después** de `deploy.sh` para ese mismo entorno: el
+script lee `TrainsApiBaseUrl` y `FrontendBucketName` del stack (`aws cloudformation
+describe-stacks`) y falla con un mensaje claro si el stack todavía no existe.
+
+Pasos que ejecuta: `npm ci` en `frontend/`, `npm run build` inyectando la URL del
+API como `VITE_API_BASE_URL` (variable de entorno de Vite, solo en build time), y
+`aws s3 sync dist/ s3://<bucket>/ --delete`. Al final imprime `FrontendWebsiteUrl`
+(el endpoint de S3 website hosting — sin CloudFront por ahora, por simplicidad).
+
+Para desarrollo local del frontend contra una API ya desplegada:
+
+```bash
+cd frontend
+npm install
+npm run dev              # usa VITE_API_BASE_URL de .env.development
+```
+
+### 4. CI/CD (GitHub Actions)
+
+`.github/workflows/deploy.yml` despliega automáticamente el **backend** en cada push,
+autenticándose vía OIDC (sin claves de larga duración):
 
 - push a **`main`** → environment/stack **`prod`**
 - push a **`develop`** → environment/stack **`dev`**
+
+El despliegue del frontend (`deploy_frontend.sh`) todavía no está integrado en este
+workflow — por ahora se ejecuta a mano tras cada despliegue de backend relevante.
 
 ---
 
