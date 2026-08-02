@@ -34,6 +34,7 @@ class TestGetTodayHandler(ApiHandlerTestCase):
             "tipo_dia": "laborable",
             "hora_programada": "07:41",
             "hora_llegada_corregida": "07:47",
+            "hora_paso_zamora": "07:03",
             "ult_retraso": 6,
             "capturado_en_zamora": True,
             "entregado": True,
@@ -57,6 +58,7 @@ class TestGetTodayHandler(ApiHandlerTestCase):
         body = json.loads(response["body"])
         self.assertEqual(len(body), 1)
         self.assertEqual(body[0]["cod_comercial"], "04154")
+        self.assertEqual(body[0]["hora_paso_zamora"], "07:03")
         self.assertNotIn("pk", body[0])
 
     def test_excludes_seed_marker_item(self):

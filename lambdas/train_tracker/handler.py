@@ -232,6 +232,9 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
 
     # ── ¿Ya pasó por Zamora? ─────────────────────────────────────────────────
     if cod_est_ant == ZAMORA_CODE:
+        # Para sentido Galicia, hora_llegada_destino es el paso programado por
+        # Zamora (no el destino final en Galicia, que este sistema no seguía
+        # nunca): hora_llegada_corregida ES la hora de paso por Zamora.
         h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
         hora_llegada_corregida = (
             datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
@@ -240,6 +243,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
         _mark_done(
             cod, now_local,
             hora_llegada_corregida=hora_llegada_corregida,
+            hora_paso_zamora=hora_llegada_corregida,
             capturado_en_zamora=True,
             ult_retraso=ult_retraso,
         )
@@ -358,8 +362,29 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
     # ── Aún en ruta hacia Madrid: actualizar estado en DynamoDB ──────────────
     # Una vez capturado pasando por Zamora, se mantiene marcado aunque el
     # tren ya haya dejado atrás esa estación en ejecuciones posteriores.
-    capturado_en_zamora = bool(state and state.get("capturado_en_zamora")) or cod_est_ant == ZAMORA_CODE
-    _update_state(cod, scheduled, ult_retraso, now_local, capturado_en_zamora=capturado_en_zamora)
+    capturado_en_zamora_previo = bool(state and state.get("capturado_en_zamora"))
+    capturado_en_zamora = capturado_en_zamora_previo or cod_est_ant == ZAMORA_CODE
+
+    if capturado_en_zamora_previo:
+        # Ya se fijó en un ciclo anterior: se conserva tal cual (put_item
+        # reemplaza el item entero, así que hay que reenviarlo cada vez).
+        hora_paso_zamora = state.get("hora_paso_zamora")
+    elif cod_est_ant == ZAMORA_CODE:
+        # Primera vez que se detecta el paso por Zamora: para sentido Madrid,
+        # hora_salida es el paso programado por Zamora (el origen real del
+        # tren, en Galicia, no se sigue en esta app).
+        h, m = map(int, scheduled["hora_salida"].split(":"))
+        hora_paso_zamora = (
+            datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
+        ).strftime("%H:%M")
+    else:
+        hora_paso_zamora = None
+
+    _update_state(
+        cod, scheduled, ult_retraso, now_local,
+        capturado_en_zamora=capturado_en_zamora,
+        hora_paso_zamora=hora_paso_zamora,
+    )
     logger.info(
         "Tren %s (Madrid) aún en ruta (última est: %s, retraso: %d min)",
         cod, cod_est_ant, ult_retraso, extra=log_extra
@@ -392,7 +417,8 @@ def _end_of_day_ttl(now_local: datetime) -> int:
 
 
 def _update_state(cod: str, scheduled: dict, retraso: int,
-                  now_local: datetime, capturado_en_zamora: bool = False):
+                  now_local: datetime, capturado_en_zamora: bool = False,
+                  hora_paso_zamora: str | None = None):
     """Persiste el estado transitorio del tren en DynamoDB."""
     ttl = _end_of_day_ttl(now_local)  # expira a las 23:59:59 del mismo día
 
@@ -401,7 +427,7 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
         datetime(2000, 1, 1, h, m) + timedelta(minutes=int(retraso))
     ).strftime("%H:%M")
 
-    state_table.put_item(Item={
+    item = {
         "pk":          f"{cod}#{now_local.date().isoformat()}",
         "cod_comercial": cod,
         "sentido":     scheduled["sentido"],
@@ -413,11 +439,18 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
         "updated_at":  now_local.isoformat(),
         "entregado":   False,
         "ttl":         ttl,
-    })
+    }
+    # put_item reemplaza el item entero: si no se pasa (p. ej. aún no
+    # capturado), se omite el atributo en vez de fabricar un valor.
+    if hora_paso_zamora is not None:
+        item["hora_paso_zamora"] = hora_paso_zamora
+
+    state_table.put_item(Item=item)
 
 
 def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None = None,
-               capturado_en_zamora: bool | None = None, ult_retraso: int | None = None):
+               capturado_en_zamora: bool | None = None, ult_retraso: int | None = None,
+               hora_paso_zamora: str | None = None):
     """Marca el tren como entregado (procesado) para hoy."""
     # "ttl" es palabra reservada en DynamoDB → hay que usar un alias (#ttl).
     # Se fija siempre aquí, ya que este item puede no haber pasado nunca por
@@ -441,6 +474,10 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None
         # _update_state, no el del ciclo en que se captura la llegada).
         set_parts.append("ult_retraso = :ult_retraso")
         values[":ult_retraso"] = ult_retraso
+
+    if hora_paso_zamora is not None:
+        set_parts.append("hora_paso_zamora = :hora_paso_zamora")
+        values[":hora_paso_zamora"] = hora_paso_zamora
 
     state_table.update_item(
         Key={"pk": f"{cod}#{now_local.date().isoformat()}"},
@@ -583,6 +620,7 @@ def daily_dump_handler(event, context):
                 "dia_semana": target_date.strftime("%A"),
                 "hora_programada": item["hora_programada"],
                 "hora_llegada_corregida": item.get("hora_llegada_corregida") if entregado else None,
+                "hora_paso_zamora": item.get("hora_paso_zamora") if entregado else None,
                 "minutos_retraso": int(item.get("ult_retraso", 0)) if entregado else None,
                 "cancelado": not entregado,
             })

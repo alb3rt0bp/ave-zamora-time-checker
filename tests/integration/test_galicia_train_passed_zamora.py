@@ -43,6 +43,10 @@ class TestGaliciaTrainPassedZamora(HandlerTestCase):
         self.assertTrue(item["entregado"])
         self.assertTrue(item["capturado_en_zamora"])
         self.assertIn("hora_llegada_corregida", item)
+        # Sentido Galicia: hora_paso_zamora coincide con hora_llegada_corregida
+        # (mismo evento). G100: hora_llegada_destino 09:30 + ultRetraso 4.
+        self.assertEqual(item["hora_paso_zamora"], "09:34")
+        self.assertEqual(item["hora_paso_zamora"], item["hora_llegada_corregida"])
 
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)
         self.assertNotIn("Contents", objects)
@@ -70,6 +74,7 @@ class TestGaliciaTrainPassedZamora(HandlerTestCase):
         record = records["G100"]
         self.assertEqual(record["sentido"], "Galicia")
         self.assertEqual(record["minutos_retraso"], 4)
+        self.assertEqual(record["hora_paso_zamora"], "09:34")
         self.assertFalse(record["cancelado"])
         self.assertNotIn("capturado_en_zamora", record)
         self.assertNotIn("cod_est_ant", record)

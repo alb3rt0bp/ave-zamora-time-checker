@@ -40,6 +40,8 @@ class TestMadridTrainNotArrived(HandlerTestCase):
         self.assertFalse(item["entregado"])
         self.assertTrue(item["capturado_en_zamora"])
         self.assertEqual(item["ult_retraso"], 5)
+        # M100: hora_salida (paso programado por Zamora) 07:00 + ultRetraso 5.
+        self.assertEqual(item["hora_paso_zamora"], "07:05")
 
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)
         self.assertNotIn("Contents", objects)

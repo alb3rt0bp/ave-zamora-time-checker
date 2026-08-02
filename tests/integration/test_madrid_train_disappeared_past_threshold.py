@@ -34,6 +34,7 @@ class TestMadridTrainDisappearedPastThreshold(HandlerTestCase):
             "hora_programada": "08:30",
             "ult_retraso": 5,
             "capturado_en_zamora": True,
+            "hora_paso_zamora": "07:05",
             "entregado": False,
         })
 
@@ -52,6 +53,9 @@ class TestMadridTrainDisappearedPastThreshold(HandlerTestCase):
 
         item = self.get_item("M100", "2026-01-05")
         self.assertTrue(item["entregado"])
+        # _mark_done (vía desaparición) no recibe hora_paso_zamora: debe
+        # sobrevivir intacta desde el ciclo en que se capturó el paso.
+        self.assertEqual(item["hora_paso_zamora"], "07:05")
 
         # El polling ya no escribe a S3: eso lo hace daily_dump_handler.
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)

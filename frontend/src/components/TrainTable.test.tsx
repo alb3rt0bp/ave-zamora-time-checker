@@ -9,6 +9,7 @@ const rows: TrainRow[] = [
     sentido: "Madrid",
     horaProgramada: "07:41",
     horaLlegada: "07:47",
+    horaPasoZamora: "07:03",
     retrasoMinutos: 6,
     cancelado: false,
   },
@@ -17,6 +18,7 @@ const rows: TrainRow[] = [
     sentido: "Galicia",
     horaProgramada: "08:00",
     horaLlegada: null,
+    horaPasoZamora: null,
     retrasoMinutos: null,
     cancelado: true,
   },
@@ -29,7 +31,28 @@ describe("TrainTable", () => {
     expect(screen.getByText("04154")).toBeInTheDocument();
     expect(screen.getByText("Madrid")).toBeInTheDocument();
     expect(screen.getByText("07:41")).toBeInTheDocument();
+    expect(screen.getByText("07:03")).toBeInTheDocument();
     expect(screen.getByText("+6 min")).toBeInTheDocument();
+  });
+
+  it("shows a dash for hora de paso por Zamora when it hasn't been captured yet", () => {
+    const rowsWithPending: TrainRow[] = [
+      ...rows,
+      {
+        codComercial: "04999",
+        sentido: "Madrid",
+        horaProgramada: "09:00",
+        horaLlegada: null,
+        horaPasoZamora: null,
+        retrasoMinutos: null,
+        cancelado: false,
+      },
+    ];
+
+    render(<TrainTable rows={rowsWithPending} />);
+
+    const pendingRow = screen.getByText("04999").closest("tr")!;
+    expect(within(pendingRow).getAllByText("-")).not.toHaveLength(0);
   });
 
   it("shows a cancelled indicator for cancelled trains", () => {
@@ -46,9 +69,9 @@ describe("TrainTable", () => {
 
   it("sorts rows by hora programada ascending, regardless of input order", () => {
     const unsorted: TrainRow[] = [
-      { codComercial: "B", sentido: "Madrid", horaProgramada: "09:00", horaLlegada: null, retrasoMinutos: null, cancelado: false },
-      { codComercial: "A", sentido: "Madrid", horaProgramada: "07:00", horaLlegada: null, retrasoMinutos: null, cancelado: false },
-      { codComercial: "C", sentido: "Madrid", horaProgramada: "08:00", horaLlegada: null, retrasoMinutos: null, cancelado: false },
+      { codComercial: "B", sentido: "Madrid", horaProgramada: "09:00", horaLlegada: null, horaPasoZamora: null, retrasoMinutos: null, cancelado: false },
+      { codComercial: "A", sentido: "Madrid", horaProgramada: "07:00", horaLlegada: null, horaPasoZamora: null, retrasoMinutos: null, cancelado: false },
+      { codComercial: "C", sentido: "Madrid", horaProgramada: "08:00", horaLlegada: null, horaPasoZamora: null, retrasoMinutos: null, cancelado: false },
     ];
 
     render(<TrainTable rows={unsorted} />);
@@ -63,6 +86,12 @@ describe("TrainTable", () => {
 
     expect(screen.getByText("Hora de llegada corregida")).toBeInTheDocument();
     expect(screen.queryByText("Hora llegada")).not.toBeInTheDocument();
+  });
+
+  it("labels the Zamora passage column as 'Hora de paso por Zamora'", () => {
+    render(<TrainTable rows={rows} />);
+
+    expect(screen.getByText("Hora de paso por Zamora")).toBeInTheDocument();
   });
 
   it("applies a border to every table cell", () => {

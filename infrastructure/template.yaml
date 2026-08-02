@@ -486,6 +486,8 @@ Resources:
               Type: string
             - Name: hora_llegada_corregida
               Type: string
+            - Name: hora_paso_zamora
+              Type: string
             - Name: minutos_retraso
               Type: int
             - Name: cancelado

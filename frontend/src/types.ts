@@ -4,6 +4,7 @@ export interface TodayTrain {
   tipo_dia: string;
   hora_programada: string;
   hora_llegada_corregida: string | null;
+  hora_paso_zamora: string | null;
   ult_retraso: number;
   capturado_en_zamora: boolean;
   entregado: boolean;
@@ -18,6 +19,9 @@ export interface DayTrain {
   dia_semana: string;
   hora_programada: string;
   hora_llegada_corregida: string | null;
+  // Ausente (no solo null) en ficheros JSONL volcados antes de que este
+  // campo existiera; el resto de campos ya estaban desde el primer volcado.
+  hora_paso_zamora?: string | null;
   minutos_retraso: number | null;
   cancelado: boolean;
 }
@@ -27,6 +31,7 @@ export interface TrainRow {
   sentido: string;
   horaProgramada: string;
   horaLlegada: string | null;
+  horaPasoZamora: string | null;
   retrasoMinutos: number | null;
   cancelado: boolean;
 }

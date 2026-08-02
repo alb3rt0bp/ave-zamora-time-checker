@@ -48,6 +48,7 @@ TODAY_ITEM_FIELDS = (
     "tipo_dia",
     "hora_programada",
     "hora_llegada_corregida",
+    "hora_paso_zamora",
     "ult_retraso",
     "capturado_en_zamora",
     "entregado",

@@ -10,6 +10,7 @@ describe("normalizeTodayTrain", () => {
       tipo_dia: "laborable",
       hora_programada: "07:41",
       hora_llegada_corregida: "07:47",
+      hora_paso_zamora: "07:03",
       ult_retraso: 6,
       capturado_en_zamora: true,
       entregado: true,
@@ -21,9 +22,27 @@ describe("normalizeTodayTrain", () => {
       sentido: "Madrid",
       horaProgramada: "07:41",
       horaLlegada: "07:47",
+      horaPasoZamora: "07:03",
       retrasoMinutos: 6,
       cancelado: false,
     });
+  });
+
+  it("defaults horaPasoZamora to null when the train hasn't reached Zamora yet", () => {
+    const train: TodayTrain = {
+      cod_comercial: "04154",
+      sentido: "Madrid",
+      tipo_dia: "laborable",
+      hora_programada: "08:30",
+      hora_llegada_corregida: null,
+      hora_paso_zamora: null,
+      ult_retraso: 0,
+      capturado_en_zamora: false,
+      entregado: false,
+      updated_at: "2026-01-05T07:00:00+01:00",
+    };
+
+    expect(normalizeTodayTrain(train).horaPasoZamora).toBeNull();
   });
 });
 
@@ -37,6 +56,7 @@ describe("normalizeDayTrain", () => {
       dia_semana: "Sunday",
       hora_programada: "07:41",
       hora_llegada_corregida: "07:47",
+      hora_paso_zamora: "07:03",
       minutos_retraso: 6,
       cancelado: false,
     };
@@ -46,6 +66,7 @@ describe("normalizeDayTrain", () => {
       sentido: "Madrid",
       horaProgramada: "07:41",
       horaLlegada: "07:47",
+      horaPasoZamora: "07:03",
       retrasoMinutos: 6,
       cancelado: false,
     });
@@ -60,6 +81,7 @@ describe("normalizeDayTrain", () => {
       dia_semana: "Sunday",
       hora_programada: "08:00",
       hora_llegada_corregida: null,
+      hora_paso_zamora: null,
       minutos_retraso: null,
       cancelado: true,
     };
@@ -69,8 +91,27 @@ describe("normalizeDayTrain", () => {
       sentido: "Galicia",
       horaProgramada: "08:00",
       horaLlegada: null,
+      horaPasoZamora: null,
       retrasoMinutos: null,
       cancelado: true,
     });
+  });
+
+  it("defaults horaPasoZamora to null for JSONL records written before the field existed", () => {
+    // Sin el campo en absoluto (no null): así son los ficheros ya volcados
+    // en S3 antes de este cambio.
+    const train = {
+      event_id: "04154-2026-01-04T07:41",
+      cod_comercial: "04154",
+      sentido: "Madrid",
+      tipo_dia: "domingo",
+      dia_semana: "Sunday",
+      hora_programada: "07:41",
+      hora_llegada_corregida: "07:47",
+      minutos_retraso: 6,
+      cancelado: false,
+    } as DayTrain;
+
+    expect(normalizeDayTrain(train).horaPasoZamora).toBeNull();
   });
 });

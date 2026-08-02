@@ -15,6 +15,7 @@ class TestProjectTodayItem(unittest.TestCase):
             "tipo_dia": "laborable",
             "hora_programada": "07:41",
             "hora_llegada_corregida": "07:47",
+            "hora_paso_zamora": "07:03",
             "ult_retraso": 6,
             "capturado_en_zamora": True,
             "entregado": True,
@@ -32,6 +33,7 @@ class TestProjectTodayItem(unittest.TestCase):
                 "tipo_dia": "laborable",
                 "hora_programada": "07:41",
                 "hora_llegada_corregida": "07:47",
+                "hora_paso_zamora": "07:03",
                 "ult_retraso": 6,
                 "capturado_en_zamora": True,
                 "entregado": True,
@@ -56,6 +58,7 @@ class TestProjectTodayItem(unittest.TestCase):
 
         self.assertNotIn("pk", projected)
         self.assertIsNone(projected.get("hora_llegada_corregida"))
+        self.assertIsNone(projected.get("hora_paso_zamora"))
 
 
 if __name__ == "__main__":

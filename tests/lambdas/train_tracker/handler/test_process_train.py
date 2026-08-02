@@ -64,6 +64,10 @@ class TestProcessTrain(HandlerTestCase):
         item = self.get_item("G100", NOW.date().isoformat())
         self.assertTrue(item["entregado"])
         self.assertTrue(item["capturado_en_zamora"])
+        # Para sentido Galicia, hora_paso_zamora coincide con
+        # hora_llegada_corregida: es el mismo evento (paso por Zamora).
+        self.assertEqual(item["hora_paso_zamora"], item["hora_llegada_corregida"])
+        self.assertEqual(item["hora_paso_zamora"], "09:34")
         # El polling ya no escribe a S3: eso lo hace daily_dump_handler.
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)
         self.assertNotIn("Contents", objects)

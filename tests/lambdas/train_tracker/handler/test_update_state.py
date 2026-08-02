@@ -50,6 +50,29 @@ class TestUpdateState(HandlerTestCase):
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["ult_retraso"], 20)
 
+    def test_hora_paso_zamora_absent_when_not_given(self):
+        self.handler._update_state("M100", SCHEDULED, 5, NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertNotIn("hora_paso_zamora", item)
+
+    def test_hora_paso_zamora_persisted_when_given(self):
+        self.handler._update_state("M100", SCHEDULED, 5, NOW, hora_paso_zamora="07:03")
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["hora_paso_zamora"], "07:03")
+
+    def test_hora_paso_zamora_dropped_by_put_item_when_omitted_on_a_later_call(self):
+        # Regresión: _update_state usa put_item (reemplaza el item entero), así
+        # que un valor fijado en un ciclo anterior desaparece si la siguiente
+        # llamada no lo reenvía explícitamente. El caller es responsable de
+        # releerlo del estado previo (ver _process_madrid_train).
+        self.handler._update_state("M100", SCHEDULED, 5, NOW, hora_paso_zamora="07:03")
+        self.handler._update_state("M100", SCHEDULED, 8, NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertNotIn("hora_paso_zamora", item)
+
 
 if __name__ == "__main__":
     unittest.main()

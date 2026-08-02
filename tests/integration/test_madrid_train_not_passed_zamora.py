@@ -41,6 +41,7 @@ class TestMadridTrainNotPassedZamora(HandlerTestCase):
         self.assertFalse(item["entregado"])
         self.assertFalse(item["capturado_en_zamora"])
         self.assertNotIn("cod_est_ant", item)
+        self.assertNotIn("hora_paso_zamora", item)
         self.assertEqual(item["ult_retraso"], 3)
 
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)

@@ -36,6 +36,7 @@ class TestDailyDumpHandler(HandlerTestCase):
             "tipo_dia": "laborable",
             "hora_programada": "08:30",
             "hora_llegada_corregida": "08:35",
+            "hora_paso_zamora": "07:03",
             "ult_retraso": 5,
             "entregado": True,
         })
@@ -49,6 +50,7 @@ class TestDailyDumpHandler(HandlerTestCase):
         self.assertEqual(record["cod_comercial"], "M100")
         self.assertEqual(record["hora_programada"], "08:30")
         self.assertEqual(record["hora_llegada_corregida"], "08:35")
+        self.assertEqual(record["hora_paso_zamora"], "07:03")
         self.assertEqual(record["minutos_retraso"], 5)
         self.assertFalse(record["cancelado"])
 
@@ -75,6 +77,7 @@ class TestDailyDumpHandler(HandlerTestCase):
         self.assertTrue(record["cancelado"])
         self.assertIsNone(record["minutos_retraso"])
         self.assertIsNone(record["hora_llegada_corregida"])
+        self.assertIsNone(record["hora_paso_zamora"])
 
     def test_excludes_seed_marker_item(self):
         self.table.put_item(Item={"pk": f"SEED#{TARGET_DAY.isoformat()}", "ttl": 0})

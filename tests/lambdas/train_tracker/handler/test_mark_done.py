@@ -85,6 +85,28 @@ class TestMarkDone(HandlerTestCase):
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["ult_retraso"], 3)
 
+    def test_sets_hora_paso_zamora_when_given(self):
+        self.handler._mark_done("M100", NOW, hora_paso_zamora="07:03")
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["hora_paso_zamora"], "07:03")
+
+    def test_does_not_touch_hora_paso_zamora_when_not_given(self):
+        # update_item es un update parcial: a diferencia de _update_state
+        # (put_item), no tocar el parámetro deja el atributo existente
+        # intacto. Así es como sobrevive hora_paso_zamora hasta la llegada a
+        # Chamartín en _process_madrid_train.
+        self.table.update_item(
+            Key={"pk": f"M100#{NOW.date().isoformat()}"},
+            UpdateExpression="SET hora_paso_zamora = :v",
+            ExpressionAttributeValues={":v": "07:03"},
+        )
+
+        self.handler._mark_done("M100", NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["hora_paso_zamora"], "07:03")
+
 
 if __name__ == "__main__":
     unittest.main()
