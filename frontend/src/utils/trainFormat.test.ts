@@ -10,6 +10,10 @@ describe("formatDelay", () => {
     expect(formatDelay(6)).toBe("+6 min");
   });
 
+  it("formats a negative delay with a single minus sign and unit", () => {
+    expect(formatDelay(-5)).toBe("-5 min");
+  });
+
   it("formats null as no data", () => {
     expect(formatDelay(null)).toBe("Sin datos");
   });

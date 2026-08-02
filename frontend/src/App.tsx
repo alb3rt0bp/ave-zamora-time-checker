@@ -12,6 +12,9 @@ export default function App() {
     <main>
       <h1>Puntualidad de trenes en Zamora</h1>
       <DatePicker value={selectedDate} maxDate={maxDate} onChange={setSelectedDate} />
+      <button type="button" onClick={() => setSelectedDate("")}>
+        Hoy
+      </button>
       {selectedDate ? <DayView date={selectedDate} /> : <TodayView />}
     </main>
   );
