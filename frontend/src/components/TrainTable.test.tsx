@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { TrainTable } from "./TrainTable";
 import type { TrainRow } from "../types";
@@ -42,5 +42,36 @@ describe("TrainTable", () => {
     render(<TrainTable rows={[]} />);
 
     expect(screen.getByText(/no hay trenes/i)).toBeInTheDocument();
+  });
+
+  it("sorts rows by hora programada ascending, regardless of input order", () => {
+    const unsorted: TrainRow[] = [
+      { codComercial: "B", sentido: "Madrid", horaProgramada: "09:00", horaLlegada: null, retrasoMinutos: null, cancelado: false },
+      { codComercial: "A", sentido: "Madrid", horaProgramada: "07:00", horaLlegada: null, retrasoMinutos: null, cancelado: false },
+      { codComercial: "C", sentido: "Madrid", horaProgramada: "08:00", horaLlegada: null, retrasoMinutos: null, cancelado: false },
+    ];
+
+    render(<TrainTable rows={unsorted} />);
+
+    const dataRows = screen.getAllByRole("row").slice(1);
+    const codes = dataRows.map((row) => within(row).getAllByRole("cell")[0].textContent);
+    expect(codes).toEqual(["A", "C", "B"]);
+  });
+
+  it("labels the arrival column as 'Hora de llegada corregida'", () => {
+    render(<TrainTable rows={rows} />);
+
+    expect(screen.getByText("Hora de llegada corregida")).toBeInTheDocument();
+    expect(screen.queryByText("Hora llegada")).not.toBeInTheDocument();
+  });
+
+  it("applies a border to every table cell", () => {
+    render(<TrainTable rows={rows} />);
+
+    const cells = [...screen.getAllByRole("columnheader"), ...screen.getAllByRole("cell")];
+    expect(cells.length).toBeGreaterThan(0);
+    cells.forEach((cell) => {
+      expect(cell).toHaveStyle({ border: "1px solid #ccc" });
+    });
   });
 });
