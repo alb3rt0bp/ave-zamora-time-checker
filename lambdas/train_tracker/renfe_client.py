@@ -27,7 +27,7 @@ class RenfeClient:
         {
           "codComercial": "04154",
           "idTren": "12345",
-          "codEstAnt": "71801",   ← código de la última estación
+          "codEstAnt": "30200",   ← código de la última estación
           "ultRetraso": 5,        ← minutos de retraso acumulado
           "lat": 41.5034,
           "lon": -5.7447,

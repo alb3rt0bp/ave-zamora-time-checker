@@ -1,7 +1,6 @@
 {
   "version": "test",
   "generated_at": "2026-01-01T00:00:00+00:00",
-  "zamora_station_code": "30200",
   "polling_window_minutes": 30,
   "trains": [
     {

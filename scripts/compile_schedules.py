@@ -123,7 +123,6 @@ def build_schedules(data_dir: str) -> dict:
     return {
         "version": "1.0",
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "zamora_station_code": "71801",
         "polling_window_minutes": 30,
         "trains": trains,
     }

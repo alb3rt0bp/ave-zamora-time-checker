@@ -45,6 +45,8 @@ import boto3
 from renfe_client import RenfeClient
 from schedule_matcher import ScheduleMatcher
 from datalake_writer import DatalakeWriter
+from gtfsrt_client import GtfsRtClient
+from gtfsrt_matcher import find_stop_time_update
 
 logger = logging.getLogger('handler')
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -55,6 +57,7 @@ DYNAMODB_TABLE  = os.environ["DYNAMODB_STATE_TABLE"]
 SCHEDULES_FILE  = os.environ.get("SCHEDULES_FILE", "/var/task/train_schedules.json")
 ZAMORA_CODE     = os.environ.get("ZAMORA_STATION_CODE", "30200")
 CHAMARTIN_CODE  = os.environ.get("CHAMARTIN_STATION_CODE", "17000")
+GTFS_RT_ENRICHMENT_ENABLED = os.environ.get("GTFS_RT_ENRICHMENT_ENABLED", "true").lower() == "true"
 DELAY_ALERT_SNS_TOPIC_ARN     = os.environ.get("DELAY_ALERT_SNS_TOPIC_ARN", "")
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
 
@@ -200,6 +203,56 @@ def _tipo_dia_for(now_local: datetime) -> str:
         return "domingo"
 
 
+def _fetch_gtfsrt_entities(log_extra: dict) -> list[dict]:
+    """
+    Descarga trip_updates_LD.json de forma segura para el enriquecimiento
+    aditivo (ver gtfsrt_client.py / CLAUDE.md): cualquier fallo se registra y
+    se ignora devolviendo una lista vacía, nunca bloquea el flujo de captura
+    probado basado en flotaLD.json.
+    """
+    if not GTFS_RT_ENRICHMENT_ENABLED:
+        return []
+    try:
+        return GtfsRtClient(log_extra, timeout_seconds=10).get_trip_updates()
+    except Exception as exc:
+        logger.warning("No se pudo descargar trip_updates_LD.json: %s", exc, extra=log_extra)
+        return []
+
+
+def _enrich_with_gtfsrt(cod: str, sentido: str, endpoint_station_code: str, log_extra: dict) -> dict:
+    """
+    Enriquecimiento aditivo y best-effort a partir del feed GTFS-RT oficial
+    de Renfe: añade minutos_retraso_gtfsrt/hora_llegada_gtfsrt (estación
+    final del sentido: Chamartín para Madrid, Zamora para Galicia) y
+    hora_paso_zamora_gtfsrt (paso por Zamora específicamente, para ambos
+    sentidos — mismo papel que el campo ya existente hora_paso_zamora).
+    Devuelve un dict listo para pasar como **kwargs a _mark_done; vacío si no
+    hay coincidencia fiable o el enriquecimiento está desactivado.
+    """
+    entities = _fetch_gtfsrt_entities(log_extra)
+    if not entities:
+        return {}
+
+    fields = {}
+    endpoint_match = find_stop_time_update(entities, cod, endpoint_station_code, log_extra)
+    if endpoint_match:
+        if "minutos_retraso" in endpoint_match:
+            fields["minutos_retraso_gtfsrt"] = endpoint_match["minutos_retraso"]
+        if "hora_llegada" in endpoint_match:
+            fields["hora_llegada_gtfsrt"] = endpoint_match["hora_llegada"]
+
+    if sentido == "Madrid" and endpoint_station_code != ZAMORA_CODE:
+        zamora_match = find_stop_time_update(entities, cod, ZAMORA_CODE, log_extra)
+        if zamora_match and "hora_llegada" in zamora_match:
+            fields["hora_paso_zamora_gtfsrt"] = zamora_match["hora_llegada"]
+    elif "hora_llegada_gtfsrt" in fields:
+        # Sentido Galicia: Zamora ES la estación final, mismo evento (igual
+        # que hora_paso_zamora == hora_llegada_corregida en el dato existente).
+        fields["hora_paso_zamora_gtfsrt"] = fields["hora_llegada_gtfsrt"]
+
+    return fields
+
+
 def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_extra: dict) -> bool:
     """
     Decide si procede marcar el tren como entregado.
@@ -240,12 +293,14 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
             datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
         ).strftime("%H:%M")
 
+        gtfsrt_fields = _enrich_with_gtfsrt(cod, "Galicia", ZAMORA_CODE, log_extra)
         _mark_done(
             cod, now_local,
             hora_llegada_corregida=hora_llegada_corregida,
             hora_paso_zamora=hora_llegada_corregida,
             capturado_en_zamora=True,
             ult_retraso=ult_retraso,
+            **gtfsrt_fields,
         )
         _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, now_local, log_extra)
         logger.info("✅ Tren %s (Galicia) entregado, retraso=%d min", cod, ult_retraso, extra=log_extra)
@@ -319,7 +374,8 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
 
             # No hay datos en vivo; el estado conocido ya tiene ult_retraso y
             # hora_llegada_corregida correctos de la última _update_state.
-            _mark_done(cod, now_local)
+            gtfsrt_fields = _enrich_with_gtfsrt(cod, "Madrid", CHAMARTIN_CODE, log_extra)
+            _mark_done(cod, now_local, **gtfsrt_fields)
             _maybe_publish_delay_alert(
                 scheduled, ult_retraso_conocido, state.get("hora_llegada_corregida"), now_local, log_extra
             )
@@ -349,11 +405,13 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
             datetime(2000, 1, 1, h, m) + timedelta(minutes=ult_retraso)
         ).strftime("%H:%M")
 
+        gtfsrt_fields = _enrich_with_gtfsrt(cod, "Madrid", CHAMARTIN_CODE, log_extra)
         _mark_done(
             cod, now_local,
             hora_llegada_corregida=hora_llegada_corregida,
             capturado_en_zamora=capturado_en_zamora,
             ult_retraso=ult_retraso,
+            **gtfsrt_fields,
         )
         _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, now_local, log_extra)
         logger.info("Tren %s ha llegado a Chamartín (codEstAnt=%s)", cod, cod_est_ant, extra=log_extra)
@@ -450,7 +508,8 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
 
 def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None = None,
                capturado_en_zamora: bool | None = None, ult_retraso: int | None = None,
-               hora_paso_zamora: str | None = None):
+               hora_paso_zamora: str | None = None, minutos_retraso_gtfsrt: int | None = None,
+               hora_llegada_gtfsrt: str | None = None, hora_paso_zamora_gtfsrt: str | None = None):
     """Marca el tren como entregado (procesado) para hoy."""
     # "ttl" es palabra reservada en DynamoDB → hay que usar un alias (#ttl).
     # Se fija siempre aquí, ya que este item puede no haber pasado nunca por
@@ -478,6 +537,18 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None
     if hora_paso_zamora is not None:
         set_parts.append("hora_paso_zamora = :hora_paso_zamora")
         values[":hora_paso_zamora"] = hora_paso_zamora
+
+    if minutos_retraso_gtfsrt is not None:
+        set_parts.append("minutos_retraso_gtfsrt = :minutos_retraso_gtfsrt")
+        values[":minutos_retraso_gtfsrt"] = minutos_retraso_gtfsrt
+
+    if hora_llegada_gtfsrt is not None:
+        set_parts.append("hora_llegada_gtfsrt = :hora_llegada_gtfsrt")
+        values[":hora_llegada_gtfsrt"] = hora_llegada_gtfsrt
+
+    if hora_paso_zamora_gtfsrt is not None:
+        set_parts.append("hora_paso_zamora_gtfsrt = :hora_paso_zamora_gtfsrt")
+        values[":hora_paso_zamora_gtfsrt"] = hora_paso_zamora_gtfsrt
 
     state_table.update_item(
         Key={"pk": f"{cod}#{now_local.date().isoformat()}"},
@@ -568,7 +639,8 @@ def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict) -> int:
 
         # El estado ya tiene ult_retraso y hora_llegada_corregida correctos
         # de la última _update_state; basta con marcarlo como entregado.
-        _mark_done(cod, now_local)
+        gtfsrt_fields = _enrich_with_gtfsrt(cod, "Madrid", CHAMARTIN_CODE, log_extra)
+        _mark_done(cod, now_local, **gtfsrt_fields)
         logger.warning(
             "Tren %s (Madrid) ventana cerrada sin detección → entregado con "
             "últimos datos conocidos (retraso: %d min)", cod, ult_retraso_conocido, extra=log_extra
@@ -622,6 +694,13 @@ def daily_dump_handler(event, context):
                 "hora_llegada_corregida": item.get("hora_llegada_corregida") if entregado else None,
                 "hora_paso_zamora": item.get("hora_paso_zamora") if entregado else None,
                 "minutos_retraso": int(item.get("ult_retraso", 0)) if entregado else None,
+                "minutos_retraso_gtfsrt": (
+                    int(item["minutos_retraso_gtfsrt"])
+                    if entregado and item.get("minutos_retraso_gtfsrt") is not None
+                    else None
+                ),
+                "hora_llegada_gtfsrt": item.get("hora_llegada_gtfsrt") if entregado else None,
+                "hora_paso_zamora_gtfsrt": item.get("hora_paso_zamora_gtfsrt") if entregado else None,
                 "cancelado": not entregado,
             })
         if "LastEvaluatedKey" not in resp:

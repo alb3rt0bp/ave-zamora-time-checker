@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import { server } from "./mocks/server";
+import { addDaysIso, yesterdayMadrid } from "./utils/dateLimits";
 import App from "./App";
 
 const API_BASE_URL = "http://localhost:3000";
@@ -106,5 +107,127 @@ describe("App", () => {
 
     expect(await screen.findByText("04154")).toBeInTheDocument();
     expect(screen.getByLabelText(/fecha/i)).toHaveValue("");
+  });
+
+  it("disables 'Día sig.' while showing today's live trains", async () => {
+    server.use(http.get(`${API_BASE_URL}/trains/today`, () => HttpResponse.json([])));
+
+    render(<App />);
+    await screen.findByText(/no hay trenes/i);
+
+    expect(screen.getByRole("button", { name: "Día sig." })).toBeDisabled();
+  });
+
+  it("'Día ant.' from today loads the most recent dumped day (maxDate)", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/trains/today`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/trains/:date`, () =>
+        HttpResponse.json([
+          {
+            event_id: "04200-2026-01-04T08:00",
+            cod_comercial: "04200",
+            sentido: "Galicia",
+            tipo_dia: "domingo",
+            dia_semana: "Sunday",
+            hora_programada: "08:00",
+            hora_llegada_corregida: "08:05",
+            minutos_retraso: 5,
+            cancelado: false,
+          },
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByText(/no hay trenes/i);
+
+    await user.click(screen.getByRole("button", { name: "Día ant." }));
+
+    expect(await screen.findByText("04200")).toBeInTheDocument();
+    expect(screen.getByLabelText(/fecha/i)).toHaveValue(yesterdayMadrid());
+  });
+
+  it("'Día sig.' from the most recent dumped day (maxDate) returns to today's live view", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/trains/today`, () =>
+        HttpResponse.json([
+          {
+            cod_comercial: "04154",
+            sentido: "Madrid",
+            tipo_dia: "laborable",
+            hora_programada: "07:41",
+            hora_llegada_corregida: "07:47",
+            ult_retraso: 6,
+            capturado_en_zamora: true,
+            entregado: true,
+            updated_at: "2026-01-05T07:47:23+01:00",
+          },
+        ]),
+      ),
+      http.get(`${API_BASE_URL}/trains/:date`, () =>
+        HttpResponse.json([
+          {
+            event_id: "04200-2026-01-04T08:00",
+            cod_comercial: "04200",
+            sentido: "Galicia",
+            tipo_dia: "domingo",
+            dia_semana: "Sunday",
+            hora_programada: "08:00",
+            hora_llegada_corregida: "08:05",
+            minutos_retraso: 5,
+            cancelado: false,
+          },
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByText("04154");
+    await user.click(screen.getByRole("button", { name: "Día ant." }));
+    await screen.findByText("04200");
+
+    await user.click(screen.getByRole("button", { name: "Día sig." }));
+
+    expect(await screen.findByText("04154")).toBeInTheDocument();
+    expect(screen.getByLabelText(/fecha/i)).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Día sig." })).toBeDisabled();
+  });
+
+  it("'Día ant.'/'Día sig.' shift a historical date by exactly one day", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/trains/today`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/trains/:date`, () =>
+        HttpResponse.json([
+          {
+            event_id: "04200-2026-01-10T08:00",
+            cod_comercial: "04200",
+            sentido: "Galicia",
+            tipo_dia: "domingo",
+            dia_semana: "Saturday",
+            hora_programada: "08:00",
+            hora_llegada_corregida: "08:05",
+            minutos_retraso: 5,
+            cancelado: false,
+          },
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByText(/no hay trenes/i);
+    await user.type(screen.getByLabelText(/fecha/i), "2026-01-10");
+    await screen.findByText("04200");
+
+    await user.click(screen.getByRole("button", { name: "Día sig." }));
+    expect(screen.getByLabelText(/fecha/i)).toHaveValue(addDaysIso("2026-01-10", 1));
+    await screen.findByText("04200");
+
+    await user.click(screen.getByRole("button", { name: "Día ant." }));
+    await user.click(screen.getByRole("button", { name: "Día ant." }));
+    expect(screen.getByLabelText(/fecha/i)).toHaveValue(addDaysIso("2026-01-10", -1));
+    await screen.findByText("04200");
   });
 });

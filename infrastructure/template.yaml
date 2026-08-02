@@ -58,6 +58,19 @@ Parameters:
       Umbral de retraso (minutos) a partir del cual, al marcarse un tren
       como entregado, se publica un tuit automático.
 
+  GtfsRtEnrichmentEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Activa el enriquecimiento aditivo con el feed GTFS-RT oficial de Renfe
+      (trip_updates_LD.json). Aditivo y no bloqueante: solo añade
+      minutos_retraso_gtfsrt/hora_llegada_gtfsrt/hora_paso_zamora_gtfsrt
+      junto a los campos ya existentes, nunca los sustituye. Por defecto
+      desactivado porque la regla de emparejamiento tripId→cod_comercial es
+      todavía provisional (ver CLAUDE.md) — actívese a propósito cuando se
+      quiera empezar la ventana de comparación.
+
   GlueDatabaseName:
     Type: String
     Default: zamora_trains_db
@@ -158,6 +171,7 @@ Resources:
         Variables:
           DELAY_ALERT_SNS_TOPIC_ARN: !Ref DelayTweetTopic
           DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
+          GTFS_RT_ENRICHMENT_ENABLED: !Ref GtfsRtEnrichmentEnabled
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrainStateTable
@@ -490,6 +504,12 @@ Resources:
               Type: string
             - Name: minutos_retraso
               Type: int
+            - Name: minutos_retraso_gtfsrt
+              Type: int
+            - Name: hora_llegada_gtfsrt
+              Type: string
+            - Name: hora_paso_zamora_gtfsrt
+              Type: string
             - Name: cancelado
               Type: boolean
 

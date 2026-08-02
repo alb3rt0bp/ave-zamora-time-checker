@@ -39,3 +39,22 @@ def raise_http_error(*args, **kwargs):
 
 def raise_url_error(*args, **kwargs):
     raise urllib.error.URLError("timed out")
+
+
+def fake_urlopen_by_url(url_to_payload: dict):
+    """
+    side_effect para @patch("urllib.request.urlopen") que despacha una
+    respuesta JSON distinta según la URL de la petición (inspecciona
+    req.full_url buscando cada fragmento de `url_to_payload` como substring).
+    Necesario en tests que, dentro de una misma llamada a lambda_handler(),
+    acceden a más de un endpoint — p. ej. flotaLD.json (RenfeClient) y
+    trip_updates_LD.json (GtfsRtClient) cuando el enriquecimiento GTFS-RT
+    está activado — y por tanto no pueden usar un único mock_urlopen.return_value.
+    """
+    def _side_effect(req, timeout=None):
+        for url_fragment, payload in url_to_payload.items():
+            if url_fragment in req.full_url:
+                return fake_urlopen_json(payload)
+        raise AssertionError(f"URL inesperada en fake_urlopen_by_url: {req.full_url}")
+
+    return _side_effect

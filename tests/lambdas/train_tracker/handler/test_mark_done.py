@@ -107,6 +107,60 @@ class TestMarkDone(HandlerTestCase):
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")
 
+    def test_sets_minutos_retraso_gtfsrt_when_given(self):
+        self.handler._mark_done("M100", NOW, minutos_retraso_gtfsrt=4)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["minutos_retraso_gtfsrt"], 4)
+
+    def test_does_not_touch_minutos_retraso_gtfsrt_when_not_given(self):
+        self.table.update_item(
+            Key={"pk": f"M100#{NOW.date().isoformat()}"},
+            UpdateExpression="SET minutos_retraso_gtfsrt = :v",
+            ExpressionAttributeValues={":v": 4},
+        )
+
+        self.handler._mark_done("M100", NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["minutos_retraso_gtfsrt"], 4)
+
+    def test_sets_hora_llegada_gtfsrt_when_given(self):
+        self.handler._mark_done("M100", NOW, hora_llegada_gtfsrt="08:49")
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["hora_llegada_gtfsrt"], "08:49")
+
+    def test_does_not_touch_hora_llegada_gtfsrt_when_not_given(self):
+        self.table.update_item(
+            Key={"pk": f"M100#{NOW.date().isoformat()}"},
+            UpdateExpression="SET hora_llegada_gtfsrt = :v",
+            ExpressionAttributeValues={":v": "08:49"},
+        )
+
+        self.handler._mark_done("M100", NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["hora_llegada_gtfsrt"], "08:49")
+
+    def test_sets_hora_paso_zamora_gtfsrt_when_given(self):
+        self.handler._mark_done("M100", NOW, hora_paso_zamora_gtfsrt="07:05")
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["hora_paso_zamora_gtfsrt"], "07:05")
+
+    def test_does_not_touch_hora_paso_zamora_gtfsrt_when_not_given(self):
+        self.table.update_item(
+            Key={"pk": f"M100#{NOW.date().isoformat()}"},
+            UpdateExpression="SET hora_paso_zamora_gtfsrt = :v",
+            ExpressionAttributeValues={":v": "07:05"},
+        )
+
+        self.handler._mark_done("M100", NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["hora_paso_zamora_gtfsrt"], "07:05")
+
 
 if __name__ == "__main__":
     unittest.main()

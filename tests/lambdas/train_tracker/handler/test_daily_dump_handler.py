@@ -79,6 +79,51 @@ class TestDailyDumpHandler(HandlerTestCase):
         self.assertIsNone(record["hora_llegada_corregida"])
         self.assertIsNone(record["hora_paso_zamora"])
 
+    def test_writes_gtfsrt_fields_when_entregado(self):
+        self.table.put_item(Item={
+            "pk": f"M100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "M100",
+            "sentido": "Madrid",
+            "tipo_dia": "laborable",
+            "hora_programada": "08:30",
+            "hora_llegada_corregida": "08:35",
+            "hora_paso_zamora": "07:03",
+            "ult_retraso": 5,
+            "minutos_retraso_gtfsrt": 4,
+            "hora_llegada_gtfsrt": "08:34",
+            "hora_paso_zamora_gtfsrt": "07:02",
+            "entregado": True,
+        })
+
+        with patch("handler.datetime", self._frozen()):
+            result = self.handler.daily_dump_handler({}, FakeContext())
+
+        body = self.s3.get_object(Bucket=self.handler.S3_BUCKET, Key=result["key"])["Body"].read()
+        record = json.loads(body.decode("utf-8").strip())
+        self.assertEqual(record["minutos_retraso_gtfsrt"], 4)
+        self.assertEqual(record["hora_llegada_gtfsrt"], "08:34")
+        self.assertEqual(record["hora_paso_zamora_gtfsrt"], "07:02")
+
+    def test_gtfsrt_fields_are_null_when_not_entregado(self):
+        self.table.put_item(Item={
+            "pk": f"G100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "G100",
+            "sentido": "Galicia",
+            "tipo_dia": "laborable",
+            "hora_programada": "09:30",
+            "ult_retraso": 0,
+            "entregado": False,
+        })
+
+        with patch("handler.datetime", self._frozen()):
+            result = self.handler.daily_dump_handler({}, FakeContext())
+
+        body = self.s3.get_object(Bucket=self.handler.S3_BUCKET, Key=result["key"])["Body"].read()
+        record = json.loads(body.decode("utf-8").strip())
+        self.assertIsNone(record["minutos_retraso_gtfsrt"])
+        self.assertIsNone(record["hora_llegada_gtfsrt"])
+        self.assertIsNone(record["hora_paso_zamora_gtfsrt"])
+
     def test_excludes_seed_marker_item(self):
         self.table.put_item(Item={"pk": f"SEED#{TARGET_DAY.isoformat()}", "ttl": 0})
 

@@ -1,5 +1,14 @@
 const MADRID_TZ = "Europe/Madrid";
 
+/** Suma (o resta, con delta negativo) días a una fecha "YYYY-MM-DD", en UTC
+ * para no arrastrar desplazamientos por huso horario del entorno. */
+export function addDaysIso(dateIso: string, delta: number): string {
+  const [year, month, day] = dateIso.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date.toISOString().slice(0, 10);
+}
+
 export function yesterdayMadrid(now: Date = new Date()): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: MADRID_TZ,

@@ -35,6 +35,13 @@ os.environ.setdefault(
 )
 os.environ.setdefault("ZAMORA_STATION_CODE", "30200")
 os.environ.setdefault("CHAMARTIN_STATION_CODE", "17000")
+# Desactivado por defecto en tests: si no, cualquier test que llegue a
+# _mark_done (vía _process_train/_process_madrid_train/_resolve_expired_
+# madrid_trains, que se testean llamando directamente con un dict `live`
+# hecho a mano, sin pasar por urllib) intentaría una petición de red real a
+# trip_updates_LD.json. Los tests que prueban el enriquecimiento en sí lo
+# activan explícitamente con @patch("handler.GTFS_RT_ENRICHMENT_ENABLED", True).
+os.environ.setdefault("GTFS_RT_ENRICHMENT_ENABLED", "false")
 os.environ.setdefault(
     "DELAY_ALERT_SNS_TOPIC_ARN",
     f"arn:aws:sns:{os.environ['AWS_DEFAULT_REGION']}:123456789012:test-zamora-delay-tweet",
