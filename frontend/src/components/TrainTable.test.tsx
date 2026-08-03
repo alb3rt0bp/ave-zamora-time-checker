@@ -98,7 +98,7 @@ describe("TrainTable", () => {
     render(<TrainTable rows={rows} />);
 
     expect(screen.queryByRole("button", { name: /reclamar/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /posible reclamación/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /posible indemnización/i })).not.toBeInTheDocument();
   });
 
   it("shows a 'Reclamar' button when the delay is greater than 15 minutes", () => {
@@ -109,10 +109,10 @@ describe("TrainTable", () => {
     render(<TrainTable rows={rowsWithDelay} />);
 
     expect(screen.getByRole("button", { name: /📝 Reclamar/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /posible reclamación/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /posible indemnización/i })).not.toBeInTheDocument();
   });
 
-  it("also shows a 'Posible reclamación' button when the delay is greater than 60 minutes", () => {
+  it("also shows a 'Posible indemnización' button when the delay is greater than 60 minutes", () => {
     const rowsWithBigDelay: TrainRow[] = [
       { codComercial: "04400", sentido: "Madrid", horaProgramada: "11:00", horaLlegada: "12:05", horaPasoZamora: "10:00", retrasoMinutos: 65, cancelado: false },
     ];
@@ -120,7 +120,7 @@ describe("TrainTable", () => {
     render(<TrainTable rows={rowsWithBigDelay} />);
 
     expect(screen.getByRole("button", { name: /📝 Reclamar/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /💶 Posible reclamación/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /💶 Posible indemnización/ })).toBeInTheDocument();
   });
 
   it("opens the claim button in a new tab pointing at the Renfe claim form", () => {
@@ -148,7 +148,7 @@ describe("TrainTable", () => {
     ];
 
     render(<TrainTable rows={rowsWithBigDelay} />);
-    fireEvent.click(screen.getByRole("button", { name: /💶 Posible reclamación/ }));
+    fireEvent.click(screen.getByRole("button", { name: /💶 Posible indemnización/ }));
 
     expect(openSpy).toHaveBeenCalledWith(
       "https://www.renfe.com/es/es/ayuda/compromiso-puntualidad",
@@ -167,7 +167,7 @@ describe("TrainTable", () => {
     render(<TrainTable rows={cancelledWithDelay} />);
 
     expect(screen.queryByRole("button", { name: /reclamar/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /posible reclamación/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /posible indemnización/i })).not.toBeInTheDocument();
   });
 
   it("applies a border to every table cell", () => {

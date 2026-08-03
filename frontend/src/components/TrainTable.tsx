@@ -57,7 +57,7 @@ export function TrainTable({ rows }: TrainTableProps) {
                   )}
                   {row.retrasoMinutos !== null && row.retrasoMinutos > POSSIBLE_CLAIM_THRESHOLD_MIN && (
                     <button type="button" onClick={() => openInNewTab(POSSIBLE_CLAIM_URL)}>
-                      💶 Posible reclamación
+                      💶 Posible indemnización
                     </button>
                   )}
                 </>
