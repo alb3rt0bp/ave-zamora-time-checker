@@ -48,8 +48,10 @@ export function TodayView() {
         type="button"
         onClick={() => setRefreshToken((token) => token + 1)}
         disabled={isRefreshing}
+        aria-label={isRefreshing ? "Actualizando..." : "Refrescar"}
+        title={isRefreshing ? "Actualizando..." : "Refrescar"}
       >
-        {isRefreshing ? "Actualizando..." : "Refrescar"}
+        ↻
       </button>
       {/* Un refresco fallido no debe hacer desaparecer los datos ya
           cargados: el error se muestra junto a la tabla, no en su lugar. */}

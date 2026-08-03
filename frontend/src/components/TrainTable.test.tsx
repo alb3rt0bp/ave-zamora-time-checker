@@ -1,5 +1,5 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { TrainTable } from "./TrainTable";
 import type { TrainRow } from "../types";
 
@@ -92,6 +92,82 @@ describe("TrainTable", () => {
     render(<TrainTable rows={rows} />);
 
     expect(screen.getByText("Hora de paso por Zamora")).toBeInTheDocument();
+  });
+
+  it("does not show claim buttons when the delay is 15 minutes or less", () => {
+    render(<TrainTable rows={rows} />);
+
+    expect(screen.queryByRole("button", { name: /reclamar/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /posible reclamación/i })).not.toBeInTheDocument();
+  });
+
+  it("shows a 'Reclamar' button when the delay is greater than 15 minutes", () => {
+    const rowsWithDelay: TrainRow[] = [
+      { codComercial: "04300", sentido: "Madrid", horaProgramada: "10:00", horaLlegada: "10:20", horaPasoZamora: "09:00", retrasoMinutos: 20, cancelado: false },
+    ];
+
+    render(<TrainTable rows={rowsWithDelay} />);
+
+    expect(screen.getByRole("button", { name: /📝 Reclamar/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /posible reclamación/i })).not.toBeInTheDocument();
+  });
+
+  it("also shows a 'Posible reclamación' button when the delay is greater than 60 minutes", () => {
+    const rowsWithBigDelay: TrainRow[] = [
+      { codComercial: "04400", sentido: "Madrid", horaProgramada: "11:00", horaLlegada: "12:05", horaPasoZamora: "10:00", retrasoMinutos: 65, cancelado: false },
+    ];
+
+    render(<TrainTable rows={rowsWithBigDelay} />);
+
+    expect(screen.getByRole("button", { name: /📝 Reclamar/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /💶 Posible reclamación/ })).toBeInTheDocument();
+  });
+
+  it("opens the claim button in a new tab pointing at the Renfe claim form", () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rowsWithDelay: TrainRow[] = [
+      { codComercial: "04300", sentido: "Madrid", horaProgramada: "10:00", horaLlegada: "10:20", horaPasoZamora: "09:00", retrasoMinutos: 20, cancelado: false },
+    ];
+
+    render(<TrainTable rows={rowsWithDelay} />);
+    fireEvent.click(screen.getByRole("button", { name: /📝 Reclamar/ }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://venta.renfe.com/vol/petitionPersonalData.do?petition_personal_data_origin=CLAIM",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    openSpy.mockRestore();
+  });
+
+  it("opens the possible-claim button in a new tab pointing at the Renfe punctuality commitment page", () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const rowsWithBigDelay: TrainRow[] = [
+      { codComercial: "04400", sentido: "Madrid", horaProgramada: "11:00", horaLlegada: "12:05", horaPasoZamora: "10:00", retrasoMinutos: 65, cancelado: false },
+    ];
+
+    render(<TrainTable rows={rowsWithBigDelay} />);
+    fireEvent.click(screen.getByRole("button", { name: /💶 Posible reclamación/ }));
+
+    expect(openSpy).toHaveBeenCalledWith(
+      "https://www.renfe.com/es/es/ayuda/compromiso-puntualidad",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
+    openSpy.mockRestore();
+  });
+
+  it("does not show claim buttons for a cancelled train even with a stale delay value", () => {
+    const cancelledWithDelay: TrainRow[] = [
+      { codComercial: "04500", sentido: "Madrid", horaProgramada: "12:00", horaLlegada: null, horaPasoZamora: null, retrasoMinutos: 90, cancelado: true },
+    ];
+
+    render(<TrainTable rows={cancelledWithDelay} />);
+
+    expect(screen.queryByRole("button", { name: /reclamar/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /posible reclamación/i })).not.toBeInTheDocument();
   });
 
   it("applies a border to every table cell", () => {

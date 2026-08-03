@@ -48,7 +48,11 @@ describe("TodayView", () => {
     render(<TodayView />);
     await screen.findByText("04154");
 
-    expect(screen.getByRole("button", { name: "Refrescar" })).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: "Refrescar" });
+    expect(button).toBeInTheDocument();
+    // Icono en vez de texto: la etiqueta accesible viene de aria-label, no
+    // del contenido visible del botón.
+    expect(button).toHaveTextContent("↻");
   });
 
   it("refetches and updates the table when 'Refrescar' is clicked", async () => {

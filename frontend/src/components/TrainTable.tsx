@@ -7,6 +7,16 @@ interface TrainTableProps {
 
 const cellStyle = { border: "1px solid #ccc" };
 
+const CLAIM_THRESHOLD_MIN = 15;
+const CLAIM_URL = "https://venta.renfe.com/vol/petitionPersonalData.do?petition_personal_data_origin=CLAIM";
+
+const POSSIBLE_CLAIM_THRESHOLD_MIN = 60;
+const POSSIBLE_CLAIM_URL = "https://www.renfe.com/es/es/ayuda/compromiso-puntualidad";
+
+function openInNewTab(url: string) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 export function TrainTable({ rows }: TrainTableProps) {
   if (rows.length === 0) {
     return <p>No hay trenes para mostrar.</p>;
@@ -34,7 +44,25 @@ export function TrainTable({ rows }: TrainTableProps) {
             <td style={cellStyle}>{row.horaProgramada}</td>
             <td style={cellStyle}>{row.cancelado ? "-" : (row.horaPasoZamora ?? "-")}</td>
             <td style={cellStyle}>{row.cancelado ? "Cancelado" : (row.horaLlegada ?? "-")}</td>
-            <td style={cellStyle}>{row.cancelado ? "-" : formatDelay(row.retrasoMinutos)}</td>
+            <td style={cellStyle}>
+              {row.cancelado ? (
+                "-"
+              ) : (
+                <>
+                  {formatDelay(row.retrasoMinutos)}
+                  {row.retrasoMinutos !== null && row.retrasoMinutos > CLAIM_THRESHOLD_MIN && (
+                    <button type="button" onClick={() => openInNewTab(CLAIM_URL)}>
+                      📝 Reclamar
+                    </button>
+                  )}
+                  {row.retrasoMinutos !== null && row.retrasoMinutos > POSSIBLE_CLAIM_THRESHOLD_MIN && (
+                    <button type="button" onClick={() => openInNewTab(POSSIBLE_CLAIM_URL)}>
+                      💶 Posible reclamación
+                    </button>
+                  )}
+                </>
+              )}
+            </td>
           </tr>
         ))}
       </tbody>
