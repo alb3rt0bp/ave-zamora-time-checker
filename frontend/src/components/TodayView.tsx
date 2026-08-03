@@ -7,10 +7,18 @@ import { TrainTable } from "./TrainTable";
 export function TodayView() {
   const [rows, setRows] = useState<TrainRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setRows(null);
+    // La primera carga (refreshToken=0) sustituye la tabla por el mensaje
+    // de "Cargando"; un refresco posterior deja la tabla anterior visible
+    // (isRefreshing) en vez de vaciarla, para no parpadear cada vez que se
+    // pulsa "Refrescar".
+    const isFirstLoad = refreshToken === 0;
+    if (isFirstLoad) setRows(null);
+    setIsRefreshing(!isFirstLoad);
     setError(null);
 
     fetchToday()
@@ -19,14 +27,34 @@ export function TodayView() {
       })
       .catch(() => {
         if (!cancelled) setError("No se han podido cargar los trenes de hoy.");
+      })
+      .finally(() => {
+        if (!cancelled) setIsRefreshing(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshToken]);
 
-  if (error) return <p role="alert">{error}</p>;
-  if (rows === null) return <p>Cargando trenes de hoy...</p>;
-  return <TrainTable rows={rows} />;
+  if (rows === null) {
+    if (error) return <p role="alert">{error}</p>;
+    return <p>Cargando trenes de hoy...</p>;
+  }
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setRefreshToken((token) => token + 1)}
+        disabled={isRefreshing}
+      >
+        {isRefreshing ? "Actualizando..." : "Refrescar"}
+      </button>
+      {/* Un refresco fallido no debe hacer desaparecer los datos ya
+          cargados: el error se muestra junto a la tabla, no en su lugar. */}
+      {error && <p role="alert">{error}</p>}
+      <TrainTable rows={rows} />
+    </div>
+  );
 }
