@@ -5,8 +5,22 @@
 
 set -euo pipefail
 
-ENVIRONMENT="${1:-dev}"
-ALERT_EMAIL="${2:-}"
+ENVIRONMENT="dev"
+ALERT_EMAIL=""
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --alert-email)
+            ALERT_EMAIL="${2:-}"
+            shift 2
+            ;;
+        *)
+            ENVIRONMENT="$1"
+            shift
+            ;;
+    esac
+done
+
 STACK_NAME="zamora-train-observability-${ENVIRONMENT}"
 AWS_REGION="${AWS_DEFAULT_REGION:-eu-south-2}"   # España (Zaragoza)
 SAM_S3_BUCKET="sam-deployment-$(aws sts get-caller-identity --query Account --output text)-${AWS_REGION}"
