@@ -60,6 +60,12 @@ CHAMARTIN_CODE  = os.environ.get("CHAMARTIN_STATION_CODE", "17000")
 GTFS_RT_ENRICHMENT_ENABLED = os.environ.get("GTFS_RT_ENRICHMENT_ENABLED", "true").lower() == "true"
 DELAY_ALERT_SNS_TOPIC_ARN     = os.environ.get("DELAY_ALERT_SNS_TOPIC_ARN", "")
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
+# Renfe ha reportado alguna vez un ultRetraso disparatado (p. ej. -562 min):
+# un bug puntual de su servicio, no un tren circulando con adelanto real.
+DATA_QUALITY_ALERT_SNS_TOPIC_ARN = os.environ.get("DATA_QUALITY_ALERT_SNS_TOPIC_ARN", "")
+NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES = int(
+    os.environ.get("NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES", "-10")
+)
 
 # ── Clientes AWS ──────────────────────────────────────────────────────────────
 dynamodb = boto3.resource("dynamodb")
@@ -282,6 +288,9 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
 
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
+    ult_retraso = _sanitize_retraso(
+        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], now_local, log_extra
+    )
 
     # ── ¿Ya pasó por Zamora? ─────────────────────────────────────────────────
     if cod_est_ant == ZAMORA_CODE:
@@ -392,6 +401,9 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
 
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
+    ult_retraso = _sanitize_retraso(
+        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], now_local, log_extra
+    )
 
     # ── Vía 2: última estación == Chamartín → llegó a Madrid ─────────────────
     if cod_est_ant == CHAMARTIN_CODE:
@@ -592,6 +604,68 @@ def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
         logger.error(
             "Error publicando alerta de retraso en SNS para %s: %s",
             scheduled["cod_comercial"], exc, extra=log_extra
+        )
+
+
+def _sanitize_retraso(cod: str, sentido: str, ult_retraso: int, hora_referencia: str,
+                       now_local: datetime, log_extra: dict) -> int:
+    """
+    Renfe ha reportado alguna vez un ultRetraso disparatado (p. ej. -562 min
+    en flotaLD.json) — un fallo puntual de su servicio, no un tren circulando
+    con adelanto real. Si el retraso cae por debajo de
+    NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES no es fiable: se recalcula
+    comparando la hora programada de referencia (hora_llegada_destino) con la
+    hora actual, y se avisa por email para poder revisarlo. La corrección se
+    propaga automáticamente a hora_llegada_corregida/hora_paso_zamora, que se
+    calculan a partir de este mismo valor.
+    """
+    if ult_retraso >= NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES:
+        return ult_retraso
+
+    h, m = map(int, hora_referencia.split(":"))
+    hora_programada = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+    retraso_corregido = round((now_local - hora_programada).total_seconds() / 60)
+
+    logger.warning(
+        "Tren %s (%s): ultRetraso=%d es anómalo (< %d min), posible bug de la API de Renfe. "
+        "Corregido a %d min comparando hora actual (%s) con hora programada (%s).",
+        cod, sentido, ult_retraso, NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES,
+        retraso_corregido, now_local.strftime("%H:%M"), hora_referencia,
+        extra=log_extra,
+    )
+    _publish_negative_delay_alert(cod, sentido, ult_retraso, retraso_corregido, now_local, log_extra)
+    return retraso_corregido
+
+
+def _publish_negative_delay_alert(cod: str, sentido: str, ult_retraso_original: int,
+                                   ult_retraso_corregido: int, now_local: datetime,
+                                   log_extra: dict) -> None:
+    """
+    Notifica por email (vía AlertTopic/SNS) un ultRetraso anómalo recibido de
+    Renfe, para poder revisar manualmente si la corrección automática fue
+    razonable. No bloquea el ciclo de polling si falla o si no hay email de
+    alertas configurado (DATA_QUALITY_ALERT_SNS_TOPIC_ARN vacío).
+    """
+    if not DATA_QUALITY_ALERT_SNS_TOPIC_ARN:
+        return
+
+    try:
+        sns.publish(
+            TopicArn=DATA_QUALITY_ALERT_SNS_TOPIC_ARN,
+            Subject=f"[Zamora Trains] Retraso negativo anómalo - tren {cod}",
+            Message=(
+                f"El tren {cod} ({sentido}) ha recibido un ultRetraso de "
+                f"{ult_retraso_original} min desde la API de Renfe, posible bug del servicio.\n\n"
+                f"Hora del evento: {now_local.isoformat()}\n"
+                f"Retraso corregido automáticamente a: {ult_retraso_corregido} min "
+                f"(estimado a partir de la hora actual)."
+            ),
+        )
+        logger.info("Alerta de retraso negativo anómalo publicada para %s", cod, extra=log_extra)
+    except Exception as exc:
+        logger.error(
+            "Error publicando alerta de retraso negativo anómalo para %s: %s",
+            cod, exc, extra=log_extra
         )
 
 

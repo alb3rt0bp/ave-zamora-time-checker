@@ -9,6 +9,7 @@ from tests.dummies.renfe_samples import (
     TRAIN_G100_EN_RUTA,
     TRAIN_G100_EN_ZAMORA,
     TRAIN_G100_EN_ZAMORA_CON_RETRASO,
+    TRAIN_G100_EN_ZAMORA_CON_RETRASO_NEGATIVO_ANOMALO,
 )
 
 TZ = ZoneInfo("Europe/Madrid")
@@ -84,6 +85,25 @@ class TestProcessTrain(HandlerTestCase):
         [alert] = self.get_published_delay_alerts()
         self.assertEqual(alert["cod_comercial"], "G100")
         self.assertEqual(alert["minutos_retraso"], TRAIN_G100_EN_ZAMORA_CON_RETRASO["ultRetraso"])
+
+    def test_galicia_anomalous_negative_delay_is_corrected(self):
+        # Bug real observado en la API de Renfe: ultRetraso=-562. hora_llegada_destino
+        # (09:30, paso programado por Zamora en sentido Galicia) frente a NOW (08:10)
+        # -> retraso corregido = -80 min, así que hora_llegada_corregida/hora_paso_zamora
+        # deben reflejar la hora actual (08:10), no la fabricada a partir del dato corrupto.
+        result = self.handler._process_train(
+            GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA_CON_RETRASO_NEGATIVO_ANOMALO, NOW, SAMPLE_LOG_EXTRA
+        )
+
+        self.assertTrue(result)
+        item = self.get_item("G100", NOW.date().isoformat())
+        self.assertEqual(item["ult_retraso"], -80)
+        self.assertEqual(item["hora_llegada_corregida"], "08:10")
+        self.assertEqual(item["hora_paso_zamora"], "08:10")
+
+        [alert] = self.get_published_data_quality_alerts()
+        self.assertIn("G100", alert["subject"])
+        self.assertIn("-562", alert["message"])
 
     def test_galicia_ult_retraso_stays_consistent_with_hora_llegada_corregida_across_cycles(self):
         # Regresión: un ciclo anterior deja ult_retraso=2 en Dynamo (vía

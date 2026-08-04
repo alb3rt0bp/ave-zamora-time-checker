@@ -47,7 +47,7 @@ Parameters:
 
   AlertEmailAddress:
     Type: String
-    Default: ""
+    Default: "albertobp@gmail.com"
     Description: Email para alertas de retrasos (opcional)
 
   DelayAlertThresholdMinutes:
@@ -57,6 +57,16 @@ Parameters:
     Description: >
       Umbral de retraso (minutos) a partir del cual, al marcarse un tren
       como entregado, se publica un tuit automático.
+
+  NegativeDelayAnomalyThresholdMinutes:
+    Type: Number
+    Default: -10
+    MaxValue: 0
+    Description: >
+      Umbral (minutos) por debajo del cual un ultRetraso reportado por Renfe
+      en flotaLD.json se considera anómalo (posible bug del servicio, no un
+      adelanto real) y se recalcula a partir de la hora actual en vez de
+      usarse tal cual. Dispara además un email a AlertEmailAddress.
 
   GtfsRtEnrichmentEnabled:
     Type: String
@@ -172,12 +182,19 @@ Resources:
           DELAY_ALERT_SNS_TOPIC_ARN: !Ref DelayTweetTopic
           DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
           GTFS_RT_ENRICHMENT_ENABLED: !Ref GtfsRtEnrichmentEnabled
+          DATA_QUALITY_ALERT_SNS_TOPIC_ARN: !If [HasAlertEmail, !Ref AlertTopic, ""]
+          NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES: !Ref NegativeDelayAnomalyThresholdMinutes
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref TrainStateTable
         - CloudWatchPutMetricPolicy: {}
         - SNSPublishMessagePolicy:
             TopicName: !GetAtt DelayTweetTopic.TopicName
+        - !If
+          - HasAlertEmail
+          - SNSPublishMessagePolicy:
+              TopicName: !GetAtt AlertTopic.TopicName
+          - !Ref AWS::NoValue
       Events:
         # Cron no admite un patrón de minutos distinto por hora en una sola
         # expresión, así que el tramo 07:00–23:30 se cubre con dos schedules:
@@ -423,6 +440,12 @@ Resources:
       AlarmActions:
         - !Ref AlertTopic
 
+  # Topic de alertas por email de propósito general: usado por HighDelayAlarm
+  # (vía CloudWatch Alarm) y también publicado directamente por
+  # TrainTrackerFunction (ver DATA_QUALITY_ALERT_SNS_TOPIC_ARN /
+  # _publish_negative_delay_alert en handler.py) cuando Renfe reporta un
+  # ultRetraso anómalo (< NegativeDelayAnomalyThresholdMinutes) en
+  # flotaLD.json, para poder revisar manualmente la corrección automática.
   AlertTopic:
     Type: AWS::SNS::Topic
     Condition: HasAlertEmail

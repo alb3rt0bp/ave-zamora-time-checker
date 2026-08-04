@@ -68,6 +68,20 @@ TRAIN_M100_EN_CHAMARTIN_CON_RETRASO = {
     "ultRetraso": 30,
 }
 
+# Tren G100 acaba de pasar por Zamora con un ultRetraso disparatado
+# (bug real observado en la API de Renfe), para probar _sanitize_retraso.
+TRAIN_G100_EN_ZAMORA_CON_RETRASO_NEGATIVO_ANOMALO = {
+    **TRAIN_G100_EN_ZAMORA,
+    "ultRetraso": -562,
+}
+
+# Tren M100 acaba de llegar a Chamartín con un ultRetraso disparatado
+# (bug real observado en la API de Renfe), para probar _sanitize_retraso.
+TRAIN_M100_EN_CHAMARTIN_CON_RETRASO_NEGATIVO_ANOMALO = {
+    **TRAIN_M100_EN_CHAMARTIN,
+    "ultRetraso": -562,
+}
+
 FLOTA_RESPONSE_SAMPLE = [TRAIN_M100_EN_RUTA, TRAIN_G100_EN_RUTA]
 
 TRENES_CON_ESTACIONES_SAMPLE = {

@@ -47,6 +47,11 @@ os.environ.setdefault(
     f"arn:aws:sns:{os.environ['AWS_DEFAULT_REGION']}:123456789012:test-zamora-delay-tweet",
 )
 os.environ.setdefault("DELAY_ALERT_THRESHOLD_MINUTES", "15")
+os.environ.setdefault(
+    "DATA_QUALITY_ALERT_SNS_TOPIC_ARN",
+    f"arn:aws:sns:{os.environ['AWS_DEFAULT_REGION']}:123456789012:test-zamora-alerts",
+)
+os.environ.setdefault("NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES", "-10")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
 AWS_REGION = os.environ["AWS_DEFAULT_REGION"]
@@ -56,3 +61,5 @@ ZAMORA_CODE = os.environ["ZAMORA_STATION_CODE"]
 CHAMARTIN_CODE = os.environ["CHAMARTIN_STATION_CODE"]
 DELAY_ALERT_SNS_TOPIC_ARN = os.environ["DELAY_ALERT_SNS_TOPIC_ARN"]
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ["DELAY_ALERT_THRESHOLD_MINUTES"])
+DATA_QUALITY_ALERT_SNS_TOPIC_ARN = os.environ["DATA_QUALITY_ALERT_SNS_TOPIC_ARN"]
+NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES = int(os.environ["NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES"])

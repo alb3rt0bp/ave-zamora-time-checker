@@ -8,6 +8,7 @@ from tests.dummies.reference_dates import MONDAY
 from tests.dummies.renfe_samples import (
     TRAIN_M100_EN_CHAMARTIN,
     TRAIN_M100_EN_CHAMARTIN_CON_RETRASO,
+    TRAIN_M100_EN_CHAMARTIN_CON_RETRASO_NEGATIVO_ANOMALO,
     TRAIN_M100_EN_RUTA,
     TRAIN_M100_EN_ZAMORA,
 )
@@ -128,6 +129,24 @@ class TestProcessMadridTrain(HandlerTestCase):
         [alert] = self.get_published_delay_alerts()
         self.assertEqual(alert["cod_comercial"], "M100")
         self.assertEqual(alert["minutos_retraso"], TRAIN_M100_EN_CHAMARTIN_CON_RETRASO["ultRetraso"])
+
+    def test_via2_chamartin_anomalous_negative_delay_is_corrected(self):
+        # Bug real observado en la API de Renfe: ultRetraso=-562. hora_llegada_destino
+        # (08:30) frente a _at(8, 35) -> retraso corregido = 5 min, así que
+        # hora_llegada_corregida debe reflejar la hora actual (08:35), no la
+        # fabricada a partir del dato corrupto.
+        result = self.handler._process_madrid_train(
+            MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN_CON_RETRASO_NEGATIVO_ANOMALO, _at(8, 35), SAMPLE_LOG_EXTRA
+        )
+
+        self.assertTrue(result)
+        item = self.get_item("M100", _at(8, 35).date().isoformat())
+        self.assertEqual(item["ult_retraso"], 5)
+        self.assertEqual(item["hora_llegada_corregida"], "08:35")
+
+        [alert] = self.get_published_data_quality_alerts()
+        self.assertIn("M100", alert["subject"])
+        self.assertIn("-562", alert["message"])
 
     def test_via2_chamartin_refreshes_ult_retraso_and_hora_llegada_corregida(self):
         # Regresión: un ciclo anterior deja ult_retraso=3 en Dynamo; en el
