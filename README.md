@@ -113,6 +113,20 @@ El evento se registra en el Data Lake en momentos distintos según la dirección
   2. el tren **desaparece de la flota** habiendo sido visto en una ejecución anterior
      (existe estado en DynamoDB) → se usa el último estado conocido.
 
+### Corrección de retrasos anómalos de Renfe
+
+`flotaLD.json` ha reportado alguna vez un `ultRetraso` disparatado (p. ej. `-562`
+minutos observado en producción) — un bug puntual del servicio de Renfe, no un tren
+circulando con adelanto real. Cada `ultRetraso` leído de la flota pasa por
+`_sanitize_retraso` (`handler.py`) antes de usarse: si cae por debajo de
+`NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES` (por defecto `-10`), se descarta y se
+recalcula comparando la hora actual con la hora programada de referencia
+(`hora_llegada_destino`) — así `hora_llegada_corregida`/`hora_paso_zamora`, que se
+derivan de ese mismo valor, quedan corregidas automáticamente en vez de arrastrar el
+dato corrupto. Cada corrección publica además un aviso por email a
+`AlertEmailAddress` (vía el topic SNS `AlertTopic`, el mismo que usa la alarma de
+retrasos altos) para poder revisarla manualmente.
+
 ---
 
 ## Estructura del proyecto
@@ -243,8 +257,10 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
   sin ningún paso adicional tras el despliegue.
 - **Athena Workgroup** — cap de 1 GB escaneado por query, resultados en el propio bucket.
 - **CloudWatch Dashboard** — retraso medio diario, trenes con retraso, invocaciones/errores.
-- **SNS + CloudWatch Alarm** (opcional) — alerta por email si un retraso supera 30 min.
-  Solo se crea si se pasa `AlertEmailAddress`.
+- **SNS + CloudWatch Alarm** (opcional) — `AlertTopic` envía email a `AlertEmailAddress`
+  cuando un retraso supera 30 min (`HighDelayAlarm`) y también cuando `train-tracker`
+  detecta un `ultRetraso` anómalo de Renfe (ver arriba). Solo se crea si se pasa
+  `AlertEmailAddress` (por defecto ya trae un valor).
 - **API HTTP `TrainsApi`** (API Gateway HttpApi, CORS abierto) — dos Lambdas de solo
   lectura sobre el mismo API, pensado para colgar aquí futuras rutas (métricas Athena,
   sugerencias de corrección) sin volver a aprovisionar nada:
@@ -264,7 +280,8 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
 | `ZamoraStationCode` | `ZAMORA_STATION_CODE` | ver ⚠️ | Código de Zamora en Renfe |
 | `ChamartinStationCode` | `CHAMARTIN_STATION_CODE` | `17000` | Detección de llegada a Madrid |
 | `PollingWindowMinutes` | (config JSON) | `30` | Ventana ± en minutos |
-| `AlertEmailAddress` | — | `""` | Si vacío, no se crea la alarma SNS |
+| `AlertEmailAddress` | `DATA_QUALITY_ALERT_SNS_TOPIC_ARN` (indirecto, vía `AlertTopic`) | `albertobp@gmail.com` | Si vacío, no se crea `AlertTopic` ni la alarma SNS |
+| `NegativeDelayAnomalyThresholdMinutes` | `NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES` | `-10` | Umbral por debajo del cual un `ultRetraso` se considera bug de Renfe y se recalcula |
 | `GlueDatabaseName` | — | `zamora_trains_db` | Base de datos Glue |
 
 ---
