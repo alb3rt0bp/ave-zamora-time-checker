@@ -48,7 +48,7 @@ from datalake_writer import DatalakeWriter
 from gtfsrt_client import GtfsRtClient
 from gtfsrt_matcher import find_stop_time_update
 
-logger = logging.getLogger('handler')
+logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # ── Configuración desde variables de entorno ──────────────────────────────────

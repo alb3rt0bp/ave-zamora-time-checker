@@ -23,7 +23,7 @@ import boto3
 import claude_client
 from x_client import XClient
 
-logger = logging.getLogger('handler')
+logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 X_API_CREDENTIALS_SECRET_ARN = os.environ["X_API_CREDENTIALS_SECRET_ARN"]
