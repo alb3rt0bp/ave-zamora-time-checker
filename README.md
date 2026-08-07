@@ -79,6 +79,21 @@ Lambda poll+reencola    →    Lambda stateless con lógica de ventana
 │                     │   Glue Table   │─────▶│     Athena       │           │
 │                     │ (sin Crawler)  │      │  (1 GB/query cap)│           │
 │                     └────────────────┘      └──────────────────┘           │
+│                                                                              │
+│  train-tracker (cont.) — al marcar un tren "entregado" con retraso alto     │
+│  (o ser el tren madrugador) publica una alerta desacoplada vía SNS:         │
+│                                                                              │
+│  ┌──────────────────┐     ┌──────────────────┐     ┌─────────────────┐    │
+│  │  SNS             │────▶│  Lambda          │────▶│  Claude Sonnet   │    │
+│  │  DelayTweetTopic │     │  tweet-notifier  │     │  4.6 (Bedrock)   │    │
+│  └──────────────────┘     └────────┬─────────┘     └─────────────────┘    │
+│                                     │ enriquecimiento aditivo               │
+│                                     ▼                                       │
+│                            ┌──────────────────┐     ┌─────────────────┐    │
+│                            │  xfetch.io       │     │  X API v2        │    │
+│                            │  (tendencias)    │     │  (OAuth1.0a,     │    │
+│                            └──────────────────┘     │  aún comentado)  │    │
+│                                                       └─────────────────┘    │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -127,6 +142,32 @@ dato corrupto. Cada corrección publica además un aviso por email a
 `AlertEmailAddress` (vía el topic SNS `AlertTopic`, el mismo que usa la alarma de
 retrasos altos) para poder revisarla manualmente.
 
+### Redacción automática de tuits (tweet-notifier)
+
+Cuando `train-tracker` marca un tren como entregado con más de
+`DelayAlertThresholdMinutes` minutos de retraso — o es el "tren madrugador"
+(`FlagshipMadridTrainCode`, por defecto `04154`, el primer tren laborable
+hacia Madrid y eje de la reivindicación de la asociación), que siempre
+dispara alerta tenga o no retraso — publica un evento en el topic SNS
+`DelayTweetTopic`. Esto desacopla la publicación del ciclo de polling: un
+fallo o lentitud de Bedrock/X/xfetch nunca bloquea ni ralentiza
+`train-tracker`.
+
+La Lambda `tweet-notifier` (`lambdas/tweet_notifier/`) consume esos eventos:
+
+- **`claude_client.py`** redacta el texto del tuit y sus hashtags con Claude
+  Sonnet 4.6 en Amazon Bedrock (`invoke_model` con salida estructurada
+  `json_schema`, sin el SDK de Anthropic), con un prompt que distingue tres
+  situaciones (tren madrugador con retraso, tren madrugador puntual, retraso
+  genérico) y fuerza siempre al menos un hashtag reivindicativo.
+- **`xfetch_client.py`** añade, como enriquecimiento aditivo y no bloqueante,
+  tendencias reales de X vía xfetch.io (proveedor externo, no la API
+  oficial de X ni una tool de Anthropic) — si falla, el tuit se redacta
+  igualmente sin ese hashtag extra.
+- **`x_client.py`** implementa la publicación real en X (API v2, OAuth1.0a
+  firmado a mano) pero está **comentada** en `handler.py` por ahora: el
+  texto redactado solo se loguea, pendiente de activar la publicación real.
+
 ---
 
 ## Estructura del proyecto
@@ -154,8 +195,14 @@ ave-zamora-time-checker/
 │   │   └── requirements.txt           # Solo tzdata (boto3 va en el runtime)
 │   ├── delay_metrics/
 │   │   └── handler.py                 # Publica métricas de retraso en CloudWatch
-│   └── api/
-│       └── handler.py                 # API HTTP solo lectura: get_today_handler / get_day_handler
+│   ├── api/
+│   │   └── handler.py                 # API HTTP solo lectura: get_today_handler / get_day_handler
+│   └── tweet_notifier/
+│       ├── handler.py                 # Disparado por SNS: redacta y (por ahora) solo loguea el tuit
+│       ├── claude_client.py           # draft_tweet vía Claude Sonnet 4.6 en Bedrock
+│       ├── xfetch_client.py           # Tendencias reales de X desde xfetch.io (enriquecimiento)
+│       ├── x_client.py                # Cliente OAuth1.0a para publicar en la API v2 de X
+│       └── requirements.txt           # Solo librería estándar (boto3 va en el runtime)
 ├── frontend/                          # Frontend Vite + React + TypeScript
 │   ├── src/
 │   │   ├── api.ts                     # Cliente HTTP: fetchToday() / fetchByDate()
@@ -261,6 +308,20 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
   cuando un retraso supera 30 min (`HighDelayAlarm`) y también cuando `train-tracker`
   detecta un `ultRetraso` anómalo de Renfe (ver arriba). Solo se crea si se pasa
   `AlertEmailAddress` (por defecto ya trae un valor).
+- **SNS `DelayTweetTopic`** — desacopla `train-tracker` de la redacción del
+  tuit; se crea siempre (no depende de `AlertEmailAddress`).
+- **Lambda `tweet-notifier`** — disparada por `DelayTweetTopic`. Redacta el
+  tuit con Claude Sonnet 4.6 en Bedrock más tendencias de xfetch.io; por
+  ahora solo loguea el resultado (ver arriba). Necesita permisos extra sobre
+  Bedrock (`InvokeModel` sobre el inference profile *y* el foundation model,
+  ya que Sonnet 4.6 solo se sirve vía cross-region inference) y sobre AWS
+  Marketplace (`ViewSubscriptions`/`Subscribe`, sin scoping por recurso —
+  la suscripción a modelos de Anthropic en Bedrock pasa por Marketplace por
+  debajo).
+- **Secrets Manager `XApiCredentialsSecret` / `XfetchApiKeySecret`** —
+  placeholders creados vacíos por el template; las credenciales OAuth1.0a
+  de la X Developer App y la API key de xfetch.io se rellenan a mano tras
+  el despliegue (consola o CLI), nunca en el template.
 - **API HTTP `TrainsApi`** (API Gateway HttpApi, CORS abierto) — dos Lambdas de solo
   lectura sobre el mismo API, pensado para colgar aquí futuras rutas (métricas Athena,
   sugerencias de corrección) sin volver a aprovisionar nada:
@@ -283,19 +344,24 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
 | `AlertEmailAddress` | `DATA_QUALITY_ALERT_SNS_TOPIC_ARN` (indirecto, vía `AlertTopic`) | `albertobp@gmail.com` | Si vacío, no se crea `AlertTopic` ni la alarma SNS |
 | `NegativeDelayAnomalyThresholdMinutes` | `NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES` | `-10` | Umbral por debajo del cual un `ultRetraso` se considera bug de Renfe y se recalcula |
 | `GlueDatabaseName` | — | `zamora_trains_db` | Base de datos Glue |
+| `DelayAlertThresholdMinutes` | `DELAY_ALERT_THRESHOLD_MINUTES` | `15` | Retraso mínimo (min) al marcar un tren entregado para publicar alerta de tuit |
+| `FlagshipMadridTrainCode` | `FLAGSHIP_MADRID_TRAIN_CODE` | `04154` | Tren madrugador: dispara alerta de tuit siempre, tenga o no retraso |
+| `ClaudeModelId` | `CLAUDE_MODEL_ID` | `global.anthropic.claude-sonnet-4-6` | Modelo Bedrock (inference profile) usado por `tweet_notifier` |
+| `GtfsRtEnrichmentEnabled` | `GTFS_RT_ENRICHMENT_ENABLED` | `false` | Activa el enriquecimiento aditivo con el feed GTFS-RT oficial de Renfe |
+| — | `XFETCH_TRENDS_ENABLED` | `true` | Activa el enriquecimiento con tendencias reales de xfetch.io en `tweet_notifier` |
 
 ---
 
-## ⚠️ Pendiente crítico antes de producción
+## Códigos de estación
 
-Los códigos de estación deben **verificarse empíricamente** contra el campo `codEstAnt`
-de `flotaLD.json` mientras un tren pasa realmente por la estación, ya que Renfe puede usar
-un identificador interno distinto del público:
-
-- **Zamora**: `deploy.sh` despliega con `71801` (también el default del `handler.py`),
-  mientras que el default del `template.yaml` es `30200`. Confirmar cuál es el correcto
-  antes de fijarlo.
-- **Chamartín**: `17000` (usado para detectar la llegada de los trenes con sentido Madrid).
+`ZAMORA_STATION_CODE=30200` y `CHAMARTIN_STATION_CODE=17000` — códigos
+públicos Adif/Renfe, confirmados vía 5 fuentes independientes (páginas de
+estación de Adif, dataset oficial de estaciones de `data.renfe.com`, un tren
+en vivo en `flotaLD.json` con `codEstSig=30200` a ~1km de Zamora,
+`trenesConEstacionesLD.json` y el feed GTFS-Realtime oficial — ver
+CLAUDE.md para el detalle). `deploy.sh` y `template.yaml` ya despliegan
+ambos con `30200`. Pendiente recomendado: confirmar una captura real en
+CloudWatch Logs tras el despliegue.
 
 ---
 
