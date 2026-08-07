@@ -60,6 +60,7 @@ CHAMARTIN_CODE  = os.environ.get("CHAMARTIN_STATION_CODE", "17000")
 GTFS_RT_ENRICHMENT_ENABLED = os.environ.get("GTFS_RT_ENRICHMENT_ENABLED", "true").lower() == "true"
 DELAY_ALERT_SNS_TOPIC_ARN     = os.environ.get("DELAY_ALERT_SNS_TOPIC_ARN", "")
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
+FLAGSHIP_MADRID_TRAIN_CODE    = os.environ.get("FLAGSHIP_MADRID_TRAIN_CODE", "04154")
 # Renfe ha reportado alguna vez un ultRetraso disparatado (p. ej. -562 min):
 # un bug puntual de su servicio, no un tren circulando con adelanto real.
 DATA_QUALITY_ALERT_SNS_TOPIC_ARN = os.environ.get("DATA_QUALITY_ALERT_SNS_TOPIC_ARN", "")
@@ -580,8 +581,14 @@ def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
     vía SNS para que un fallo/lentitud de la API de X no afecte al ciclo de
     polling. Un fallo al publicar se loguea pero no debe tirar la Lambda: el
     tren ya ha quedado grabado como entregado antes de esta llamada.
+
+    El tren FLAGSHIP_MADRID_TRAIN_CODE (el primer laborable hacia Madrid, eje
+    central de la reivindicación del "tren madrugador") es la excepción: se
+    publica siempre, tenga o no retraso, para que tweet_notifier pueda
+    recordar la reivindicación cada día laborable.
     """
-    if ult_retraso <= DELAY_ALERT_THRESHOLD_MINUTES:
+    es_tren_madrugador = scheduled["cod_comercial"] == FLAGSHIP_MADRID_TRAIN_CODE
+    if not es_tren_madrugador and ult_retraso <= DELAY_ALERT_THRESHOLD_MINUTES:
         return
 
     try:
@@ -594,6 +601,7 @@ def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
                 "hora_llegada_corregida": hora_llegada_corregida,
                 "minutos_retraso": ult_retraso,
                 "fecha": now_local.date().isoformat(),
+                "es_tren_madrugador": es_tren_madrugador,
             }),
         )
         logger.info(

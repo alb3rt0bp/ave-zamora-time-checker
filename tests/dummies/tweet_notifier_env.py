@@ -28,14 +28,16 @@ os.environ.setdefault("AWS_SECURITY_TOKEN", "testing")
 os.environ.setdefault("AWS_SESSION_TOKEN", "testing")
 os.environ.setdefault("AWS_DEFAULT_REGION", "eu-south-2")
 
-# Variable de entorno que handler.py lee a nivel de módulo (import time).
-# Se usa un nombre de secret simple (no un ARN completo): moto acepta el
-# nombre como SecretId igual que la API real.
+# Variables de entorno que handler.py/claude_client.py/xfetch_client.py leen
+# a nivel de módulo (import time). Se usan nombres de secret simples (no un
+# ARN completo): moto acepta el nombre como SecretId igual que la API real.
 os.environ.setdefault("X_API_CREDENTIALS_SECRET_ARN", "test-zamora-x-api-credentials")
+os.environ.setdefault("XFETCH_API_KEY_SECRET_ARN", "test-zamora-xfetch-api-key")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
 AWS_REGION = os.environ["AWS_DEFAULT_REGION"]
 X_API_CREDENTIALS_SECRET_ARN = os.environ["X_API_CREDENTIALS_SECRET_ARN"]
+XFETCH_API_KEY_SECRET_ARN = os.environ["XFETCH_API_KEY_SECRET_ARN"]
 
 
 def import_tweet_notifier_handler():

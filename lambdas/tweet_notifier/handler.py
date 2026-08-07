@@ -3,9 +3,11 @@ handler.py — Lambda: tweet_notifier
 
 Consume los eventos SNS publicados por train_tracker (ver
 train_tracker/handler.py:_maybe_publish_delay_alert) cuando un tren se marca
-entregado con más de DELAY_ALERT_THRESHOLD_MINUTES minutos de retraso, y
-publica un tuit en la cuenta de la Asociación de Usuarios de Trenes AVE de
-Zamora.
+entregado con más de DELAY_ALERT_THRESHOLD_MINUTES minutos de retraso (o es
+el tren madrugador de Madrid, que siempre genera alerta), y redacta un tuit
+para la Asociación de Usuarios de Trenes AVE de Zamora vía Claude
+(claude_client.draft_tweet). Por ahora el tuit solo se loguea — la
+publicación real en X (más abajo, comentada) queda pendiente de activar.
 
 Las credenciales OAuth1.0a de la X Developer App se leen de Secrets Manager
 y se cachean en memoria de módulo (por contenedor Lambda) tras la primera
@@ -18,6 +20,7 @@ import os
 
 import boto3
 
+import claude_client
 from x_client import XClient
 
 logger = logging.getLogger('handler')
@@ -29,15 +32,9 @@ secretsmanager = boto3.client("secretsmanager")
 
 _credentials_cache: dict | None = None
 
-TWEET_TEMPLATE = (
-    "🚨 El tren {cod_comercial} ({sentido}) ha llegado a Zamora con "
-    "{minutos_retraso} min de retraso (previsto {hora_programada}, "
-    "real {hora_llegada_corregida}). #TrenZamora"
-)
-
 
 def lambda_handler(event, context):
-    """Punto de entrada: publica un tuit por cada registro SNS del evento."""
+    """Punto de entrada: redacta y loguea un tuit por cada registro SNS del evento."""
     log_extra = {'span_id': context.aws_request_id}
     #credentials = _get_credentials(log_extra)
     #client = XClient(credentials, log_extra)
@@ -45,10 +42,22 @@ def lambda_handler(event, context):
     published = 0
     for record in event.get("Records", []):
         alert = json.loads(record["Sns"]["Message"])
-        text = TWEET_TEMPLATE.format(**alert)
+        cod_comercial = alert.get("cod_comercial")
+        try:
+            drafted = claude_client.draft_tweet(alert, log_extra)
+        except Exception as exc:
+            logger.error("Error redactando tuit para %s: %s", cod_comercial, exc, extra=log_extra)
+            continue
+
+        text = f"{drafted['tweet_text']}\n\n{' '.join(drafted['hashtags'])}"
+        if len(text) > 280:
+            logger.warning(
+                "Tuit para %s supera los 280 caracteres (%d)",
+                cod_comercial, len(text), extra=log_extra
+            )
         logger.info(f'Texto que se va a publicar: {text}')
         #client.post_tweet(text)
-        logger.info("Tuit publicado para el tren %s", alert.get("cod_comercial"), extra=log_extra)
+        logger.info("Tuit publicado para el tren %s", cod_comercial, extra=log_extra)
         published += 1
 
     return {"statusCode": 200, "published": published}

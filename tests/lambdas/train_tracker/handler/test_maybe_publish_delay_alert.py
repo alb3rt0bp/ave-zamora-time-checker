@@ -16,6 +16,16 @@ SCHEDULED = {
     "hora_llegada_destino": "08:30",
 }
 
+# "04154" es el FLAGSHIP_MADRID_TRAIN_CODE por defecto (ver handler.py) — el
+# primer tren laborable hacia Madrid, eje de la reivindicación del tren
+# madrugador. Publica alerta siempre, tenga o no retraso.
+FLAGSHIP_SCHEDULED = {
+    "cod_comercial": "04154",
+    "sentido": "Madrid",
+    "tipo_dia": "laborable",
+    "hora_llegada_destino": "08:56",
+}
+
 
 class TestMaybePublishDelayAlert(HandlerTestCase):
     def test_does_not_publish_at_threshold(self):
@@ -46,6 +56,27 @@ class TestMaybePublishDelayAlert(HandlerTestCase):
             "hora_llegada_corregida": "08:50",
             "minutos_retraso": 20,
             "fecha": NOW.date().isoformat(),
+            "es_tren_madrugador": False,
+        })
+
+    def test_flagship_train_publishes_even_with_zero_delay(self):
+        self.handler._maybe_publish_delay_alert(FLAGSHIP_SCHEDULED, 0, "08:56", NOW, SAMPLE_LOG_EXTRA)
+
+        alerts = self.get_published_delay_alerts()
+        self.assertEqual(len(alerts), 1)
+
+    def test_flagship_train_payload_marks_es_tren_madrugador(self):
+        self.handler._maybe_publish_delay_alert(FLAGSHIP_SCHEDULED, 20, "09:16", NOW, SAMPLE_LOG_EXTRA)
+
+        [alert] = self.get_published_delay_alerts()
+        self.assertEqual(alert, {
+            "cod_comercial": "04154",
+            "sentido": "Madrid",
+            "hora_programada": "08:56",
+            "hora_llegada_corregida": "09:16",
+            "minutos_retraso": 20,
+            "fecha": NOW.date().isoformat(),
+            "es_tren_madrugador": True,
         })
 
 

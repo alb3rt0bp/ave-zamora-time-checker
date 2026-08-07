@@ -58,6 +58,23 @@ Parameters:
       Umbral de retraso (minutos) a partir del cual, al marcarse un tren
       como entregado, se publica un tuit automático.
 
+  FlagshipMadridTrainCode:
+    Type: String
+    Default: "04154"
+    Description: >
+      cod_comercial del primer tren laborable hacia Madrid (el "tren
+      madrugador" de la reivindicación de la asociación). Este tren publica
+      alerta de tuit siempre, tenga o no retraso — ver
+      train_tracker/handler.py:_maybe_publish_delay_alert.
+
+  ClaudeModelId:
+    Type: String
+    Default: global.anthropic.claude-sonnet-4-6
+    Description: >
+      ID de modelo Bedrock (con prefijo de inference profile: este modelo
+      solo se sirve vía cross-region inference, no on-demand) usado por
+      tweet_notifier para redactar el texto del tuit y los hashtags.
+
   NegativeDelayAnomalyThresholdMinutes:
     Type: Number
     Default: -10
@@ -181,6 +198,7 @@ Resources:
         Variables:
           DELAY_ALERT_SNS_TOPIC_ARN: !Ref DelayTweetTopic
           DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
+          FLAGSHIP_MADRID_TRAIN_CODE: !Ref FlagshipMadridTrainCode
           GTFS_RT_ENRICHMENT_ENABLED: !Ref GtfsRtEnrichmentEnabled
           DATA_QUALITY_ALERT_SNS_TOPIC_ARN: !If [HasAlertEmail, !Ref AlertTopic, ""]
           NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES: !Ref NegativeDelayAnomalyThresholdMinutes
@@ -273,6 +291,17 @@ Resources:
       SecretString: >-
         {"consumer_key":"","consumer_secret":"","access_token":"","access_token_secret":""}
 
+  # Placeholder: la API key real de xfetch.io (proveedor externo de datos
+  # públicos de X, no la API oficial de X ni de Anthropic — ver
+  # lambdas/tweet_notifier/xfetch_client.py) se rellena a mano tras el
+  # despliegue, igual que XApiCredentialsSecret.
+  XfetchApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "zamora-trains-xfetch-api-key-${Environment}"
+      Description: "API key de xfetch.io para tendencias de X (rellenar a mano tras el despliegue)"
+      SecretString: "CHANGEME"
+
   TweetNotifierFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -281,16 +310,41 @@ Resources:
       Handler: handler.lambda_handler
       Description: >
         Disparada por DelayTweetTopic cuando un tren se marca entregado con
-        más de DelayAlertThresholdMinutes minutos de retraso. Publica un
-        tuit en la cuenta de la asociación vía la API de X.
+        más de DelayAlertThresholdMinutes minutos de retraso (o es el tren
+        madrugador). Redacta el tuit con Claude (Bedrock) más tendencias de
+        xfetch.io; por ahora solo lo loguea.
       Environment:
         Variables:
           X_API_CREDENTIALS_SECRET_ARN: !Ref XApiCredentialsSecret
+          CLAUDE_MODEL_ID: !Ref ClaudeModelId
+          DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
+          XFETCH_API_KEY_SECRET_ARN: !Ref XfetchApiKeySecret
+          XFETCH_TRENDS_ENABLED: "true"
       Policies:
         - Statement:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
-              Resource: !Ref XApiCredentialsSecret
+              Resource:
+                - !Ref XApiCredentialsSecret
+                - !Ref XfetchApiKeySecret
+            # Modelo de cross-region inference: hace falta permiso tanto
+            # sobre el inference profile como sobre el foundation model al
+            # que enruta (ver infrastructure notes / AWS docs de Bedrock).
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource:
+                - !Sub "arn:aws:bedrock:${AwsRegion}:${AWS::AccountId}:inference-profile/${ClaudeModelId}"
+                - "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6"
+            # Los modelos de Anthropic en Bedrock están sujetos a suscripción
+            # de AWS Marketplace por debajo: sin estos dos permisos, la
+            # comprobación de entitlement de InvokeModel puede fallar aunque
+            # el rol ya tenga bedrock:InvokeModel. No admite scoping por
+            # recurso — requieren Resource: "*".
+            - Effect: Allow
+              Action:
+                - aws-marketplace:ViewSubscriptions
+                - aws-marketplace:Subscribe
+              Resource: "*"
       Events:
         DelayTweetSubscription:
           Type: SNS
