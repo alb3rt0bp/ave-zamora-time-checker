@@ -5,7 +5,7 @@ from datetime import date, datetime, timezone
 
 import boto3
 
-logger = logging.getLogger()
+logger = logging.getLogger("api")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 S3_BUCKET = os.environ["DATALAKE_S3_BUCKET"]

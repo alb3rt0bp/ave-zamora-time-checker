@@ -13,10 +13,12 @@ Ventana según sentido:
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Callable, Optional
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"train_tracker.{__name__}")
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 
 class ScheduleMatcher:

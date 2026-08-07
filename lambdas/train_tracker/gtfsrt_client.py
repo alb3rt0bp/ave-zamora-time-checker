@@ -15,8 +15,10 @@ import json
 import logging
 import urllib.request
 import urllib.error
+import os
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"train_tracker.{__name__}")
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 TRIP_UPDATES_URL = "https://gtfsrt.renfe.com/trip_updates_LD.json"
 

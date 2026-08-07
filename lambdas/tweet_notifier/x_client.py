@@ -16,7 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"tweet_notifier.{__name__}")
 
 TWEETS_URL = "https://api.x.com/2/tweets"
 

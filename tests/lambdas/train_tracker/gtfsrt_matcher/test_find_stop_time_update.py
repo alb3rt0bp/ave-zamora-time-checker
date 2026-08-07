@@ -80,7 +80,7 @@ class TestFindStopTimeUpdate(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_ambiguous_match_logs_warning_with_candidate_trip_ids(self):
-        with self.assertLogs("gtfsrt_matcher", level="WARNING") as logs:
+        with self.assertLogs("train_tracker.gtfsrt_matcher", level="WARNING") as logs:
             find_stop_time_update(
                 [ENTITY_M100_COLLISION_A, ENTITY_M100_COLLISION_B], "M100", CHAMARTIN_CODE, SAMPLE_LOG_EXTRA
             )

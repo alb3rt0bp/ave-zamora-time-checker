@@ -7,8 +7,10 @@ import json
 import logging
 import urllib.request
 import urllib.error
+import os
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"train_tracker.{__name__}")
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 FLOTA_URL         = "https://tiempo-real.largorecorrido.renfe.com/renfe-visor/flotaLD.json"
 TRENES_ESTACIONES = "https://tiempo-real.largorecorrido.renfe.com/renfe-visor/trenesConEstacionesLD.json"

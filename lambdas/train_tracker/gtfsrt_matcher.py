@@ -16,8 +16,10 @@ provisional hasta acumular más muestras.
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import os
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"train_tracker.{__name__}")
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 
 def find_stop_time_update(

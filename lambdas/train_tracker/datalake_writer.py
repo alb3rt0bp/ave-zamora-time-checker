@@ -17,9 +17,11 @@ lectura en Athena (sin capa gratuita).
 
 import json
 import logging
+import os
 from datetime import date, datetime
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"train_tracker.{__name__}")
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 S3_PREFIX = "zamora-trains"
 

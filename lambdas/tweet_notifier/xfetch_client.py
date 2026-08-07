@@ -20,7 +20,7 @@ import urllib.request
 
 import boto3
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"tweet_notifier.{__name__}")
 
 TRENDS_URL = "https://api.xfetch.io/v1/trends"
 SPAIN_WOEID = os.environ.get("XFETCH_TRENDS_WOEID", "23424950")

@@ -19,7 +19,8 @@ import boto3
 
 import xfetch_client
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(f"tweet_notifier.{__name__}")
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "global.anthropic.claude-sonnet-4-6")
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))

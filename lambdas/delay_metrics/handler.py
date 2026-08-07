@@ -10,7 +10,7 @@ import logging
 import os
 import boto3
 
-logger = logging.getLogger()
+logger = logging.getLogger("delay_metrics")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 cloudwatch = boto3.client("cloudwatch")
