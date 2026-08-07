@@ -44,6 +44,10 @@ hechos.
 Actores a mencionar cuando encaje de forma natural: @Renfe, @adif_es, el \
 Ministerio de Transportes.
 
+Las horas que se reciben en el prompt `hora_prevista` y `hora_real`son las horas de llegada a Destino: 
+- A Madrid si el sentido es Madrid
+- A Zamora si el sentido es Galicia
+
 Hay tres situaciones posibles, indicadas en el mensaje del usuario:
 
 - "tren_madrugador_con_retraso": el tren es el único tren laborable que \
@@ -62,21 +66,28 @@ retraso. Reivindica un servicio ferroviario de calidad y fiable, para que \
 las instituciones no se olviden de Zamora — no menciones el tren \
 madrugador en este caso.
 
+Con los 2 casos de tren madrugador, además del mensaje es conveniente mencionar las siguientes cuentas:
+- @diputación_de_zamora
+- @jcyl
+- @minsterio_de_transportes
+
 Hashtags: elige entre 2 y 4, variando entre tuits. Incluye SIEMPRE al \
-menos uno de este grupo reivindicativo: #ZamoraNecesitaTren \
-#TrenMadrugadorYa #ZamoraAVE #AVEZamora #ZamoraConecta. Completa con \
+menos uno de este grupo reivindicativo: #ZamoraNecesitaSuTren \
+#TrenMadrugadorYa #ZamoraEnUnaHora #AVEZamora #ZamoraConecta. Completa con \
 hashtags genéricos (#Renfe #TrenAVE #MovilidadSostenible \
 #TransportePublico #FerrocarrilEspañol) y/o territoriales (#Zamora \
 #CastillaYLeón #DespoblaciónRural #EspañaVaciada) según encaje.
 
 Si el mensaje del usuario incluye una lista de tendencias actuales en X, \
-añade una de esas tendencias como hashtag extra solo si encaja de forma \
+añade una de esos hastags tendencia, pero escogiendo el que mejor puede encajar de forma \
 natural con el mensaje — nunca en sustitución del hashtag reivindicativo \
-obligatorio. Si no se incluye ninguna lista, o ninguna tendencia encaja, \
+obligatorio, pero siempre incluir un hashtag tendencia. Si no se incluye ninguna lista,\
 no fuerces nada.
 
-El campo tweet_text debe dejar margen suficiente para que, sumado a los \
-hashtags elegidos, el conjunto no supere los 280 caracteres."""
+El contenido del campo `text` devuelto debe dejar margen suficiente para que, sumado a los \
+hashtags elegidos, el conjunto no supere los 280 caracteres.
+
+Es importante mencionar que el limite de 280 caracteres es un limite duro, por lo que AWS Bedrock *no* puede retornar más de 280 caracteres de texto"""
 
 OUTPUT_SCHEMA = {
     "type": "object",
