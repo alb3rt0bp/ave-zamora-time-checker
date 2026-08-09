@@ -30,8 +30,8 @@ export function Clock() {
   }, []);
 
   return (
-    <p aria-label="Hora actual en España">
-      {dateFormatter.format(now)} — {timeFormatter.format(now)}
+    <p className="app-subtitle" aria-label="Hora actual en España">
+      {dateFormatter.format(now)} · {timeFormatter.format(now)}
     </p>
   );
 }

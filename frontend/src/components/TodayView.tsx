@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { fetchToday } from "../api";
-import type { TrainRow } from "../types";
+import type { RenfeTren, TrainRow } from "../types";
 import { normalizeTodayTrain } from "../utils/normalizeTrain";
 import { TrainTable } from "./TrainTable";
 
-export function TodayView() {
+interface TodayViewProps {
+  flota?: Map<string, RenfeTren>;
+}
+
+export function TodayView({ flota }: TodayViewProps) {
   const [rows, setRows] = useState<TrainRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -38,25 +42,42 @@ export function TodayView() {
   }, [refreshToken]);
 
   if (rows === null) {
-    if (error) return <p role="alert">{error}</p>;
-    return <p>Cargando trenes de hoy...</p>;
+    if (error)
+      return (
+        <p role="alert" className="state-card state-card--error">
+          {error}
+        </p>
+      );
+    return (
+      <div className="state-card">
+        <span className="spinner" aria-hidden="true" />
+        <p>Cargando trenes de hoy...</p>
+      </div>
+    );
   }
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setRefreshToken((token) => token + 1)}
-        disabled={isRefreshing}
-        aria-label={isRefreshing ? "Actualizando..." : "Refrescar"}
-        title={isRefreshing ? "Actualizando..." : "Refrescar"}
-      >
-        ↻
-      </button>
+      <div className="today-toolbar">
+        <button
+          type="button"
+          className="icon-btn icon-btn--glass"
+          onClick={() => setRefreshToken((token) => token + 1)}
+          disabled={isRefreshing}
+          aria-label={isRefreshing ? "Actualizando..." : "Refrescar"}
+          title={isRefreshing ? "Actualizando..." : "Refrescar"}
+        >
+          <span className={isRefreshing ? "icon-btn__glyph--spinning" : undefined}>↻</span>
+        </button>
+      </div>
       {/* Un refresco fallido no debe hacer desaparecer los datos ya
           cargados: el error se muestra junto a la tabla, no en su lugar. */}
-      {error && <p role="alert">{error}</p>}
-      <TrainTable rows={rows} />
+      {error && (
+        <p role="alert" className="inline-alert">
+          {error}
+        </p>
+      )}
+      <TrainTable rows={rows} flota={flota} />
     </div>
   );
 }

@@ -445,6 +445,26 @@ Resources:
         Project: ZamoraTrainObservability
         Environment: !Ref Environment
 
+  GetFlotaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-get-flota-${Environment}"
+      CodeUri: ../lambdas/api/
+      Handler: handler.get_flota_handler
+      Description: >
+        Proxy de solo lectura de flotaLD.json de Renfe (sin cabeceras CORS):
+        reenvía la respuesta tal cual, añadiendo Access-Control-Allow-Origin.
+      Events:
+        GetFlotaApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrainsApi
+            Path: /renfe/flota
+            Method: GET
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
   # ── Frontend: hosting estático ──────────────────────────────────────────────
   # Sin CloudFront por ahora (decisión explícita para simplicidad en esta
   # alpha): se sirve directamente vía el endpoint de website hosting de S3.

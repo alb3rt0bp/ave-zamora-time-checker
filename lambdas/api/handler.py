@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timezone
 
 import boto3
@@ -11,6 +13,11 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 S3_BUCKET = os.environ["DATALAKE_S3_BUCKET"]
 DYNAMODB_TABLE = os.environ["DYNAMODB_STATE_TABLE"]
 S3_PREFIX = "zamora-trains"
+
+# flotaLD.json no envía cabeceras CORS, así que el frontend no puede
+# consultarlo directamente desde el navegador: este handler solo reenvía la
+# respuesta añadiendo Access-Control-Allow-Origin (ver _json_response).
+FLOTA_URL = "https://tiempo-real.largorecorrido.renfe.com/renfe-visor/flotaLD.json"
 
 dynamodb = boto3.resource("dynamodb")
 s3 = boto3.client("s3")
@@ -115,3 +122,26 @@ def get_day_handler(event, context):
 
     logger.info("get_day_handler: %d trenes para %s", len(trains), target_date.isoformat(), extra=log_extra)
     return _json_response(200, trains)
+
+
+def get_flota_handler(event, context):
+    log_extra = {'span_id': context.aws_request_id}
+
+    req = urllib.request.Request(
+        FLOTA_URL,
+        headers={
+            "User-Agent": "ZamoraTrainObservability/1.0 (AWS Lambda proxy)",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            raw = response.read()
+    except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+        logger.error("get_flota_handler: fallo al contactar Renfe: %s", exc, extra=log_extra)
+        return _json_response(502, {"error": "no se pudo obtener la posición en tiempo real de Renfe"})
+
+    data = json.loads(raw)
+    trenes = data.get("trenes") or [] if isinstance(data, dict) else []
+    logger.info("get_flota_handler: proxy de flotaLD.json (%d trenes)", len(trenes), extra=log_extra)
+    return _json_response(200, data)

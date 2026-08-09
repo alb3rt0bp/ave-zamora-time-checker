@@ -1,7 +1,17 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TrainTable } from "./TrainTable";
-import type { TrainRow } from "../types";
+import type { RenfeTren, TrainRow } from "../types";
+
+vi.mock("./TrainMapModal", () => ({
+  TrainMapModal: ({ codComercial, onClose }: { codComercial: string; onClose: () => void }) => (
+    <div role="dialog" aria-label={`mapa de ${codComercial}`}>
+      <button type="button" onClick={onClose}>
+        Cerrar
+      </button>
+    </div>
+  ),
+}));
 
 const rows: TrainRow[] = [
   {
@@ -170,13 +180,56 @@ describe("TrainTable", () => {
     expect(screen.queryByRole("button", { name: /posible indemnización/i })).not.toBeInTheDocument();
   });
 
-  it("applies a border to every table cell", () => {
-    render(<TrainTable rows={rows} />);
+  it("renders the header and data cells inside the styled table card", () => {
+    const { container } = render(<TrainTable rows={rows} />);
 
+    expect(container.querySelector(".table-card")).toBeInTheDocument();
+    expect(container.querySelector(".train-table")).toBeInTheDocument();
     const cells = [...screen.getAllByRole("columnheader"), ...screen.getAllByRole("cell")];
     expect(cells.length).toBeGreaterThan(0);
-    cells.forEach((cell) => {
-      expect(cell).toHaveStyle({ border: "1px solid #ccc" });
+  });
+
+  describe("live position link", () => {
+    const flotaWith04154: Map<string, RenfeTren> = new Map([
+      ["04154", { codComercial: "04154", latitud: 41.5, longitud: -5.74 }],
+    ]);
+
+    it("renders the train code as plain text when there is no live position for it", () => {
+      render(<TrainTable rows={rows} flota={new Map()} />);
+
+      expect(screen.getByText("04154")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "04154" })).not.toBeInTheDocument();
+    });
+
+    it("renders the train code as a clickable link when a live position is available", () => {
+      render(<TrainTable rows={rows} flota={flotaWith04154} />);
+
+      expect(screen.getByRole("button", { name: "04154" })).toBeInTheDocument();
+      // El otro tren de la tabla no tiene posición en vivo: sigue en texto plano.
+      expect(screen.queryByRole("button", { name: "04200" })).not.toBeInTheDocument();
+    });
+
+    it("opens the map modal for the clicked train", () => {
+      render(<TrainTable rows={rows} flota={flotaWith04154} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "04154" }));
+
+      expect(screen.getByRole("dialog", { name: "mapa de 04154" })).toBeInTheDocument();
+    });
+
+    it("closes the map modal when it reports onClose", () => {
+      render(<TrainTable rows={rows} flota={flotaWith04154} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "04154" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("does not render a modal when no train has been clicked", () => {
+      render(<TrainTable rows={rows} flota={flotaWith04154} />);
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
   });
 });

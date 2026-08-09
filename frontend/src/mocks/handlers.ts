@@ -7,4 +7,7 @@ export const handlers = [
   http.get(`${API_BASE_URL}/trains/:date`, () =>
     HttpResponse.json({ error: "no hay datos para esa fecha todavía" }, { status: 404 }),
   ),
+  http.get(`${API_BASE_URL}/renfe/flota`, () =>
+    HttpResponse.json({ fechaActualizacion: "2026-01-05T07:47:00", trenes: [] }),
+  ),
 ];

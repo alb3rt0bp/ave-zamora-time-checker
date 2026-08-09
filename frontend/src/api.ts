@@ -1,4 +1,4 @@
-import type { DayTrain, TodayTrain } from "./types";
+import type { DayTrain, RenfeTren, TodayTrain } from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -22,4 +22,13 @@ export function fetchToday(): Promise<TodayTrain[]> {
 
 export function fetchByDate(dateIso: string): Promise<DayTrain[]> {
   return fetchJson<DayTrain[]>(`/trains/${dateIso}`);
+}
+
+interface RenfeFlotaResponse {
+  fechaActualizacion: string;
+  trenes: RenfeTren[];
+}
+
+export function fetchRenfeFlota(): Promise<RenfeTren[]> {
+  return fetchJson<RenfeFlotaResponse>("/renfe/flota").then((data) => data.trenes);
 }

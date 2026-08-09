@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchByDate, NotFoundError } from "../api";
-import type { TrainRow } from "../types";
+import type { RenfeTren, TrainRow } from "../types";
 import { normalizeDayTrain } from "../utils/normalizeTrain";
 import { TrainTable } from "./TrainTable";
 
@@ -8,9 +8,10 @@ type Status = "loading" | "ok" | "not-found" | "error";
 
 interface DayViewProps {
   date: string;
+  flota?: Map<string, RenfeTren>;
 }
 
-export function DayView({ date }: DayViewProps) {
+export function DayView({ date, flota }: DayViewProps) {
   const [rows, setRows] = useState<TrainRow[]>([]);
   const [status, setStatus] = useState<Status>("loading");
 
@@ -35,8 +36,20 @@ export function DayView({ date }: DayViewProps) {
     };
   }, [date]);
 
-  if (status === "loading") return <p>Cargando trenes del {date}...</p>;
-  if (status === "not-found") return <p>Todavía no hay datos volcados para esa fecha.</p>;
-  if (status === "error") return <p role="alert">No se han podido cargar los trenes de esa fecha.</p>;
-  return <TrainTable rows={rows} />;
+  if (status === "loading") {
+    return (
+      <div className="state-card">
+        <span className="spinner" aria-hidden="true" />
+        <p>Cargando trenes del {date}...</p>
+      </div>
+    );
+  }
+  if (status === "not-found") return <p className="state-card">Todavía no hay datos volcados para esa fecha.</p>;
+  if (status === "error")
+    return (
+      <p role="alert" className="state-card state-card--error">
+        No se han podido cargar los trenes de esa fecha.
+      </p>
+    );
+  return <TrainTable rows={rows} flota={flota} />;
 }

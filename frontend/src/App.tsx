@@ -1,12 +1,15 @@
 import { useState } from "react";
+import { ChevronLeftIcon, ChevronRightIcon } from "./components/icons";
 import { Clock } from "./components/Clock";
 import { DatePicker } from "./components/DatePicker";
 import { DayView } from "./components/DayView";
 import { TodayView } from "./components/TodayView";
+import { useRenfeFlota } from "./hooks/useRenfeFlota";
 import { addDaysIso, yesterdayMadrid } from "./utils/dateLimits";
 
 export default function App() {
   const [selectedDate, setSelectedDate] = useState("");
+  const flota = useRenfeFlota();
   const maxDate = yesterdayMadrid();
   // selectedDate === "" significa "hoy" (vista en vivo, sin fecha volcada
   // todavía); para calcular el día anterior necesitamos su equivalente ISO.
@@ -24,20 +27,35 @@ export default function App() {
   }
 
   return (
-    <main>
-      <Clock />
-      <h1>Puntualidad de trenes en Zamora</h1>
-      <button type="button" onClick={goToPreviousDay}>
-        Día ant.
-      </button>
-      <DatePicker value={selectedDate} maxDate={maxDate} onChange={setSelectedDate} />
-      <button type="button" onClick={goToNextDay} disabled={selectedDate === ""}>
-        Día sig.
-      </button>
-      <button type="button" onClick={() => setSelectedDate("")}>
-        Hoy
-      </button>
-      {selectedDate ? <DayView date={selectedDate} /> : <TodayView />}
-    </main>
+    <div className="app-shell">
+      <header className="app-header glass">
+        <h1 className="app-title">Puntualidad de trenes en Zamora</h1>
+        <Clock />
+        <div className="date-toolbar">
+          <div className="date-toolbar__nav glass">
+            <button type="button" className="date-toolbar__step" onClick={goToPreviousDay}>
+              <ChevronLeftIcon />
+              <span className="date-toolbar__label">Día ant.</span>
+            </button>
+            <DatePicker value={selectedDate} maxDate={maxDate} onChange={setSelectedDate} />
+            <button
+              type="button"
+              className="date-toolbar__step"
+              onClick={goToNextDay}
+              disabled={selectedDate === ""}
+            >
+              <span className="date-toolbar__label">Día sig.</span>
+              <ChevronRightIcon />
+            </button>
+          </div>
+          <button type="button" className="pill-button pill-button--accent" onClick={() => setSelectedDate("")}>
+            Hoy
+          </button>
+        </div>
+      </header>
+      <main className="app-main">
+        {selectedDate ? <DayView date={selectedDate} flota={flota} /> : <TodayView flota={flota} />}
+      </main>
+    </div>
   );
 }

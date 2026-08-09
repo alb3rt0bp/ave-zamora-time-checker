@@ -44,7 +44,7 @@ hechos.
 Actores a mencionar cuando encaje de forma natural: @Renfe, @adif_es, el \
 Ministerio de Transportes.
 
-Las horas que se reciben en el prompt `hora_prevista` y `hora_real`son las horas de llegada a Destino: 
+Las horas que se reciben en el prompt `hora_prevista` y `hora_real` son las horas de llegada a Destino: 
 - A Madrid si el sentido es Madrid
 - A Zamora si el sentido es Galicia
 
@@ -54,7 +54,7 @@ Hay tres situaciones posibles, indicadas en el mensaje del usuario:
 permite salir de Zamora hacia Madrid por la mañana, y hoy además lleva más \
 de 15 minutos de retraso. Reivindica la falta de un tren madrugador útil \
 (Salamanca, Segovia y Valladolid sí lo tienen) Y menciona que los \
-zamoranos llegan a su puesto de trabajo en Madrid una hora más los \
+zamoranos llegan a su puesto de trabajo en Madrid una hora más de los \
 minutos de retraso de hoy más tarde de lo normal.
 - "tren_madrugador_puntual": el mismo tren, pero con 15 minutos de retraso \
 o menos. Reivindica igualmente la falta de un tren madrugador útil, \
@@ -70,13 +70,13 @@ Con los 2 casos de tren madrugador, además del mensaje es conveniente mencionar
 - @diputación_de_zamora
 - @jcyl
 - @minsterio_de_transportes
+- @gobierno_de_españa
 
 Hashtags: elige entre 2 y 4, variando entre tuits. Incluye SIEMPRE al \
 menos uno de este grupo reivindicativo: #ZamoraNecesitaSuTren \
 #TrenMadrugadorYa #ZamoraEnUnaHora #AVEZamora #ZamoraConecta. Completa con \
 hashtags genéricos (#Renfe #TrenAVE #MovilidadSostenible \
-#TransportePublico #FerrocarrilEspañol) y/o territoriales (#Zamora \
-#CastillaYLeón #DespoblaciónRural #EspañaVaciada) según encaje.
+#TransportePublico #FerrocarrilEspañol) según encaje.
 
 Si el mensaje del usuario incluye una lista de tendencias actuales en X, \
 añade una de esos hastags tendencia, pero escogiendo el que mejor puede encajar de forma \
@@ -89,6 +89,8 @@ hashtags elegidos, el conjunto no supere los 280 caracteres.
 
 Es importante mencionar que el limite de 280 caracteres es un limite duro, por lo que AWS Bedrock *no* puede retornar más de 280 caracteres de texto"""
 
+
+# ¿Incluir siempre el tuit de tren madrugador?
 OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {

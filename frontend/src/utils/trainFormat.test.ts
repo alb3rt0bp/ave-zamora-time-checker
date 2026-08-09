@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDelay, isCancelled, isTrainLate } from "./trainFormat";
+import { delayStatus, formatDelay, isCancelled, isTrainLate } from "./trainFormat";
 
 describe("formatDelay", () => {
   it("formats zero delay as on-time", () => {
@@ -49,5 +49,30 @@ describe("isCancelled", () => {
 
   it("is false when cancelado is absent", () => {
     expect(isCancelled({})).toBe(false);
+  });
+});
+
+describe("delayStatus", () => {
+  it("is 'danger' for a cancelled train regardless of its stale delay value", () => {
+    expect(delayStatus(90, true)).toBe("danger");
+    expect(delayStatus(null, true)).toBe("danger");
+  });
+
+  it("is 'neutral' when there is no delay data", () => {
+    expect(delayStatus(null, false)).toBe("neutral");
+  });
+
+  it("is 'ok' for on-time and small delays (10 min or less)", () => {
+    expect(delayStatus(0, false)).toBe("ok");
+    expect(delayStatus(10, false)).toBe("ok");
+  });
+
+  it("is 'warn' for delays over 10 up to 15 minutes", () => {
+    expect(delayStatus(11, false)).toBe("warn");
+    expect(delayStatus(15, false)).toBe("warn");
+  });
+
+  it("is 'danger' for delays over 15 minutes", () => {
+    expect(delayStatus(16, false)).toBe("danger");
   });
 });

@@ -35,3 +35,12 @@ export interface TrainRow {
   retrasoMinutos: number | null;
   cancelado: boolean;
 }
+
+// Posición en vivo de un tren, tal y como la publica flotaLD.json (vía el
+// proxy /renfe/flota, necesario porque el endpoint de Renfe no envía
+// cabeceras CORS y el navegador no puede consultarlo directamente).
+export interface RenfeTren {
+  codComercial: string;
+  latitud: number;
+  longitud: number;
+}
