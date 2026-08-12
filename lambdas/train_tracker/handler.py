@@ -45,6 +45,7 @@ import boto3
 from renfe_client import RenfeClient
 from schedule_matcher import ScheduleMatcher
 from datalake_writer import DatalakeWriter
+from metrics_writer import MetricsWriter
 from gtfsrt_client import GtfsRtClient
 from gtfsrt_matcher import find_stop_time_update
 
@@ -54,6 +55,7 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 # ── Configuración desde variables de entorno ──────────────────────────────────
 S3_BUCKET       = os.environ["DATALAKE_S3_BUCKET"]
 DYNAMODB_TABLE  = os.environ["DYNAMODB_STATE_TABLE"]
+DYNAMODB_METRICS_TABLE = os.environ["DYNAMODB_METRICS_TABLE"]
 SCHEDULES_FILE  = os.environ.get("SCHEDULES_FILE", "/var/task/train_schedules.json")
 ZAMORA_CODE     = os.environ.get("ZAMORA_STATION_CODE", "30200")
 CHAMARTIN_CODE  = os.environ.get("CHAMARTIN_STATION_CODE", "17000")
@@ -61,6 +63,12 @@ GTFS_RT_ENRICHMENT_ENABLED = os.environ.get("GTFS_RT_ENRICHMENT_ENABLED", "true"
 DELAY_ALERT_SNS_TOPIC_ARN     = os.environ.get("DELAY_ALERT_SNS_TOPIC_ARN", "")
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
 FLAGSHIP_MADRID_TRAIN_CODE    = os.environ.get("FLAGSHIP_MADRID_TRAIN_CODE", "04154")
+# Umbral de "retraso significativo" para las métricas precalculadas
+# (TRAIN#/WEEK#/MONTH# en DYNAMODB_METRICS_TABLE). Deliberadamente
+# independiente de DELAY_ALERT_THRESHOLD_MINUTES (ese controla los tuits
+# automáticos): ambos comparten hoy el mismo valor por defecto por
+# coincidencia, no porque sean el mismo concern.
+SIGNIFICANT_DELAY_THRESHOLD_MINUTES = int(os.environ.get("SIGNIFICANT_DELAY_THRESHOLD_MINUTES", "15"))
 # Renfe ha reportado alguna vez un ultRetraso disparatado (p. ej. -562 min):
 # un bug puntual de su servicio, no un tren circulando con adelanto real.
 DATA_QUALITY_ALERT_SNS_TOPIC_ARN = os.environ.get("DATA_QUALITY_ALERT_SNS_TOPIC_ARN", "")
@@ -77,6 +85,7 @@ with open(SCHEDULES_FILE, "r", encoding="utf-8") as fh:
     schedules_config = json.load(fh)
 
 state_table = dynamodb.Table(DYNAMODB_TABLE)
+metrics_table = dynamodb.Table(DYNAMODB_METRICS_TABLE)
 
 
 def lambda_handler(event, context):
@@ -797,4 +806,15 @@ def daily_dump_handler(event, context):
     key = writer.write_daily_batch(records, target_date)
 
     logger.info("Volcado diario completado: %d trenes en %s", len(records), key, extra=log_extra)
+
+    # Best-effort: la tabla de métricas es una caché derivada del volcado a
+    # S3, que sigue siendo la fuente de verdad. Un fallo aquí no debe afectar
+    # al resultado del volcado diario, ya completado con éxito.
+    try:
+        MetricsWriter(metrics_table, SIGNIFICANT_DELAY_THRESHOLD_MINUTES, log_extra).update_daily_metrics(
+            records, target_date, now_local
+        )
+    except Exception as exc:
+        logger.error("Error actualizando métricas precalculadas para %s: %s", target_date_iso, exc, extra=log_extra)
+
     return {"statusCode": 200, "written": len(records), "key": key}

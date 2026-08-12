@@ -22,12 +22,16 @@ class ApiHandlerTestCase(unittest.TestCase):
         self.addCleanup(self.mock_aws.stop)
 
         self.table = aws_resources.create_state_table()
+        self.metrics_table = aws_resources.create_metrics_table()
         self.s3 = aws_resources.create_datalake_bucket()
 
         self.handler = api_env.import_api_handler()
 
     def put_state_item(self, item: dict) -> None:
         self.table.put_item(Item=item)
+
+    def put_metrics_item(self, item: dict) -> None:
+        self.metrics_table.put_item(Item=item)
 
     def get_item(self, cod: str, fecha_iso: str):
         resp = self.table.get_item(Key={"pk": f"{cod}#{fecha_iso}"})

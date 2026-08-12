@@ -10,4 +10,11 @@ export const handlers = [
   http.get(`${API_BASE_URL}/renfe/flota`, () =>
     HttpResponse.json({ fechaActualizacion: "2026-01-05T07:47:00", trenes: [] }),
   ),
+  http.get(`${API_BASE_URL}/metrics/trains`, () => HttpResponse.json([])),
+  http.get(`${API_BASE_URL}/metrics/weeks`, () => HttpResponse.json([])),
+  http.get(`${API_BASE_URL}/metrics/months`, () => HttpResponse.json([])),
+  http.get(`${API_BASE_URL}/metrics/global`, () =>
+    HttpResponse.json({ error: "no hay métricas todavía" }, { status: 404 }),
+  ),
+  http.get(`${API_BASE_URL}/trains/schedule`, () => HttpResponse.json([])),
 ];

@@ -30,6 +30,8 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "eu-south-2")
 # Variables de entorno que handler.py lee a nivel de módulo (import time).
 os.environ.setdefault("DATALAKE_S3_BUCKET", "test-zamora-datalake")
 os.environ.setdefault("DYNAMODB_STATE_TABLE", "test-zamora-train-state")
+os.environ.setdefault("DYNAMODB_METRICS_TABLE", "test-zamora-train-metrics")
+os.environ.setdefault("SIGNIFICANT_DELAY_THRESHOLD_MINUTES", "15")
 os.environ.setdefault(
     "SCHEDULES_FILE", os.path.join(DUMMIES_DIR, "train_schedules_sample.json")
 )
@@ -56,6 +58,7 @@ os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
 AWS_REGION = os.environ["AWS_DEFAULT_REGION"]
 DYNAMODB_TABLE_NAME = os.environ["DYNAMODB_STATE_TABLE"]
+DYNAMODB_METRICS_TABLE_NAME = os.environ["DYNAMODB_METRICS_TABLE"]
 S3_BUCKET_NAME = os.environ["DATALAKE_S3_BUCKET"]
 ZAMORA_CODE = os.environ["ZAMORA_STATION_CODE"]
 CHAMARTIN_CODE = os.environ["CHAMARTIN_STATION_CODE"]

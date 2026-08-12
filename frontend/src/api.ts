@@ -1,4 +1,13 @@
-import type { DayTrain, RenfeTren, TodayTrain } from "./types";
+import type {
+  DayTrain,
+  GlobalMetrics,
+  MonthMetrics,
+  RenfeTren,
+  TodayTrain,
+  TrainMetrics,
+  TrainSchedule,
+  WeekMetrics,
+} from "./types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -31,4 +40,26 @@ interface RenfeFlotaResponse {
 
 export function fetchRenfeFlota(): Promise<RenfeTren[]> {
   return fetchJson<RenfeFlotaResponse>("/renfe/flota").then((data) => data.trenes);
+}
+
+export function fetchTrainMetrics(): Promise<TrainMetrics[]> {
+  return fetchJson<TrainMetrics[]>("/metrics/trains");
+}
+
+export function fetchWeekMetrics(): Promise<WeekMetrics[]> {
+  return fetchJson<WeekMetrics[]>("/metrics/weeks");
+}
+
+export function fetchMonthMetrics(): Promise<MonthMetrics[]> {
+  return fetchJson<MonthMetrics[]>("/metrics/months");
+}
+
+// Propaga NotFoundError en 404 (aún no se ha agregado ningún día), igual
+// que fetchByDate.
+export function fetchGlobalMetrics(): Promise<GlobalMetrics> {
+  return fetchJson<GlobalMetrics>("/metrics/global");
+}
+
+export function fetchTrainSchedule(): Promise<TrainSchedule[]> {
+  return fetchJson<TrainSchedule[]>("/trains/schedule");
 }

@@ -10,7 +10,12 @@ en un único proceso (mismo problema ya resuelto por tweet_notifier_env.py).
 Reutiliza los nombres de tabla/bucket de test ya definidos en aws_env.py
 (DYNAMODB_TABLE_NAME, S3_BUCKET_NAME) en vez de redefinir nuevas constantes,
 para que los tests de api y de train_tracker apunten a los mismos recursos
-moto.
+moto. SCHEDULES_FILE (que lambdas/api/handler.py también necesita, para
+get_train_schedule_handler) se reutiliza igual: aws_env.py ya lo fija vía
+os.environ.setdefault() al importarse (más arriba en este mismo fichero),
+así que get_train_schedule_handler ve el mismo fixture reducido
+(tests/dummies/train_schedules_sample.json) que usan los tests de
+train_tracker — no hace falta fijarlo aquí de nuevo.
 """
 import importlib.util
 import os
@@ -30,10 +35,12 @@ if API_DIR not in sys.path:
 # Variables de entorno que lambdas/api/handler.py lee a nivel de módulo.
 os.environ.setdefault("DATALAKE_S3_BUCKET", aws_env.S3_BUCKET_NAME)
 os.environ.setdefault("DYNAMODB_STATE_TABLE", aws_env.DYNAMODB_TABLE_NAME)
+os.environ.setdefault("DYNAMODB_METRICS_TABLE", aws_env.DYNAMODB_METRICS_TABLE_NAME)
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
 AWS_REGION = aws_env.AWS_REGION
 DYNAMODB_TABLE_NAME = aws_env.DYNAMODB_TABLE_NAME
+DYNAMODB_METRICS_TABLE_NAME = aws_env.DYNAMODB_METRICS_TABLE_NAME
 S3_BUCKET_NAME = aws_env.S3_BUCKET_NAME
 
 

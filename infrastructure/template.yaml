@@ -58,6 +58,19 @@ Parameters:
       Umbral de retraso (minutos) a partir del cual, al marcarse un tren
       como entregado, se publica un tuit automático.
 
+  SignificantDelayThresholdMinutes:
+    Type: Number
+    Default: 15
+    MinValue: 1
+    MaxValue: 60   # por encima de 60 el tramo "significativo" quedaría vacío/contradictorio con "grave"
+    Description: >
+      Umbral de retraso (minutos) a partir del cual un viaje cuenta como
+      "retraso significativo" en las métricas precalculadas (por tren,
+      semanales, mensuales). Deliberadamente independiente de
+      DelayAlertThresholdMinutes (ese controla los tuits automáticos, un
+      concern distinto que hoy comparte el mismo valor por coincidencia)
+      — ver lambdas/train_tracker/metrics_writer.py.
+
   FlagshipMadridTrainCode:
     Type: String
     Default: "04154"
@@ -127,6 +140,8 @@ Globals:
         CHAMARTIN_STATION_CODE: !Ref ChamartinStationCode
         DATALAKE_S3_BUCKET:   !Ref DatalakeBucket
         DYNAMODB_STATE_TABLE: !Ref TrainStateTable
+        DYNAMODB_METRICS_TABLE: !Ref TrainMetricsTable
+        SIGNIFICANT_DELAY_THRESHOLD_MINUTES: !Ref SignificantDelayThresholdMinutes
         LOG_LEVEL:            INFO
 
 
@@ -180,6 +195,28 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true                # Los registros expiran automáticamente tras 24h
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  # ── DynamoDB: Métricas de puntualidad precalculadas ────────────────────────
+  # Tabla permanente (sin TTL), a diferencia de TrainStateTable: aquí vive el
+  # histórico agregado por tren (TRAIN#{cod_comercial}), semana ISO
+  # (WEEK#{iso_year}-W{iso_week}) y mes natural (MONTH#{year}-{month}),
+  # actualizado una vez al día por DailyDumpFunction (ver
+  # lambdas/train_tracker/metrics_writer.py) y servido de solo lectura por
+  # GetTrainMetricsFunction/GetWeekMetricsFunction/GetMonthMetricsFunction.
+  TrainMetricsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "zamora-train-metrics-${Environment}"
+      BillingMode: PAY_PER_REQUEST
+      TableClass: STANDARD
+      AttributeDefinitions:
+        - AttributeName: pk          # "TRAIN#{cod}" | "WEEK#{iso_year}-W{iso_week}" | "MONTH#{year}-{month}"
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
 
@@ -249,12 +286,14 @@ Resources:
       CodeUri: ../lambdas/train_tracker/
       Handler: handler.daily_dump_handler
       Description: >
-        Ejecutada una vez al día a las 00:15 (hora de Madrid). Lee de
-        DynamoDB los trenes del día anterior marcados como entregados y
-        escribe un único fichero JSONL en el Data Lake S3.
+        Ejecutada una vez al día a las 00:15 (hora de Madrid). Vuelca a S3
+        los trenes del día anterior y actualiza (best-effort) las métricas
+        precalculadas en TrainMetricsTable.
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref TrainStateTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TrainMetricsTable
         - S3WritePolicy:
             BucketName: !Ref DatalakeBucket
       Events:
@@ -460,6 +499,126 @@ Resources:
           Properties:
             ApiId: !Ref TrainsApi
             Path: /renfe/flota
+            Method: GET
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  # ── API HTTP: métricas de puntualidad precalculadas ────────────────────────
+  # Solo lectura sobre TrainMetricsTable (poblada por DailyDumpFunction, ver
+  # lambdas/train_tracker/metrics_writer.py): porcentajes/ranking derivados en
+  # el propio handler a partir de contadores ya agregados, nunca recalculados
+  # desde cero en cada petición.
+  GetTrainMetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-get-train-metrics-${Environment}"
+      CodeUri: ../lambdas/api/
+      Handler: handler.get_train_metrics_handler
+      Description: >
+        API de solo lectura: métricas de puntualidad por tren (histórico
+        completo), incluyendo ranking de probabilidad de retraso
+        significativo respecto al resto de trenes.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrainMetricsTable
+      Events:
+        GetTrainMetricsApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrainsApi
+            Path: /metrics/trains
+            Method: GET
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  GetWeekMetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-get-week-metrics-${Environment}"
+      CodeUri: ../lambdas/api/
+      Handler: handler.get_week_metrics_handler
+      Description: >
+        API de solo lectura: métricas de puntualidad por semana ISO
+        (lunes-domingo), incluyendo la semana en curso (parcial).
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrainMetricsTable
+      Events:
+        GetWeekMetricsApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrainsApi
+            Path: /metrics/weeks
+            Method: GET
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  GetMonthMetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-get-month-metrics-${Environment}"
+      CodeUri: ../lambdas/api/
+      Handler: handler.get_month_metrics_handler
+      Description: >
+        API de solo lectura: métricas de puntualidad por mes natural,
+        incluyendo el mes en curso (parcial).
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrainMetricsTable
+      Events:
+        GetMonthMetricsApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrainsApi
+            Path: /metrics/months
+            Method: GET
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  GetGlobalMetricsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-get-global-metrics-${Environment}"
+      CodeUri: ../lambdas/api/
+      Handler: handler.get_global_metrics_handler
+      Description: >
+        API de solo lectura: métricas de puntualidad de todo el histórico
+        (día de la semana, franja horaria y tren con más riesgo de retraso
+        significativo). Devuelve 404 si aún no se ha agregado ningún día.
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref TrainMetricsTable
+      Events:
+        GetGlobalMetricsApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrainsApi
+            Path: /metrics/global
+            Method: GET
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  GetTrainScheduleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-get-train-schedule-${Environment}"
+      CodeUri: ../lambdas/api/
+      Handler: handler.get_train_schedule_handler
+      Description: >
+        API de solo lectura: días de la semana (lunes-domingo) que circula
+        cada tren, a partir del horario compilado (train_schedules.json).
+        No accede a DynamoDB.
+      Events:
+        GetTrainScheduleApi:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref TrainsApi
+            Path: /trains/schedule
             Method: GET
       Tags:
         Project: ZamoraTrainObservability
