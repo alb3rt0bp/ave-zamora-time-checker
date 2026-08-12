@@ -1,0 +1,1121 @@
+/* Sistema visual "iOS Liquid Glass": materiales translúcidos, tipografía del
+   sistema Apple, esquinas continuas grandes en superficies y controles en
+   forma de píldora. No existe un paquete CSS oficial de Apple para web
+   (Liquid Glass es un material nativo de plataformas Apple); esto es una
+   aproximación honesta con backdrop-filter + bordes en capas. */
+
+:root {
+  color-scheme: light dark;
+
+  --ios-blue: #007aff;
+  --ios-green: #34c759;
+  --ios-orange: #ff9500;
+  --ios-red: #ff3b30;
+
+  --bg-canvas: #f2f2f7;
+  --bg-surface: rgb(255 255 255 / 72%);
+  --bg-surface-solid: #ffffff;
+  --bg-elevated: rgb(255 255 255 / 86%);
+  --border-hairline: rgb(60 60 67 / 16%);
+  --text-primary: #1c1c1e;
+  --text-secondary: rgb(60 60 67 / 60%);
+  --text-tertiary: rgb(60 60 67 / 40%);
+
+  --accent: var(--ios-blue);
+  --status-ok: var(--ios-green);
+  --status-warn: var(--ios-orange);
+  --status-danger: var(--ios-red);
+  /* Cuarto nivel de severidad (entre ok y warn) para los 4 tramos de
+     retraso del gráfico de tipo queso de Estadísticas: amarillo del
+     sistema iOS, completando la rampa semántica verde→amarillo→naranja→rojo. */
+  --status-mild: #ffcc00;
+
+  --shadow-ambient: 0 8px 30px rgb(20 20 30 / 12%);
+
+  --radius-lg: 22px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
+
+  /* Menú lateral: el shell tiene una columna de grid dedicada a "sidebar"
+     (ver .app-shell / .app-sidebar más abajo). */
+  --sidebar-w: 240px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ios-blue: #0a84ff;
+    --ios-green: #30d158;
+    --ios-orange: #ff9f0a;
+    --ios-red: #ff453a;
+
+    --bg-canvas: #000000;
+    --bg-surface: rgb(28 28 30 / 72%);
+    --bg-surface-solid: #1c1c1e;
+    --bg-elevated: rgb(44 44 46 / 86%);
+    --border-hairline: rgb(84 84 88 / 48%);
+    --text-primary: #f2f2f7;
+    --text-secondary: rgb(235 235 245 / 60%);
+    --text-tertiary: rgb(235 235 245 / 40%);
+    --status-mild: #ffd60a;
+
+    --shadow-ambient: 0 8px 30px rgb(0 0 0 / 45%);
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font-family: inherit;
+  color: inherit;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Material "glass": el fallback sólido cubre navegadores/usuarios sin
+   backdrop-filter o con prefers-reduced-transparency activado. */
+.glass {
+  background: var(--bg-surface-solid);
+  border: 1px solid var(--border-hairline);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  @media (prefers-reduced-transparency: no-preference) {
+    .glass {
+      background: var(--bg-surface);
+      backdrop-filter: blur(24px) saturate(160%);
+      -webkit-backdrop-filter: blur(24px) saturate(160%);
+      box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 12%),
+        var(--shadow-ambient);
+    }
+  }
+}
+
+/* Layout raíz de la app: la primera columna del grid aloja el menú lateral
+   (ver --sidebar-w arriba y .app-sidebar más abajo). */
+.app-shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "sidebar header" "sidebar main";
+}
+
+/* Fijo a la altura del viewport (no de todo el contenido, que puede ser más
+   alto que la pantalla): así el menú permanece visible al hacer scroll en
+   páginas largas, con su propio scroll interno si hiciera falta. */
+.app-sidebar {
+  grid-area: sidebar;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  padding: 20px 12px;
+  border-right: 1px solid var(--border-hairline);
+  overflow-y: auto;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-nav__item,
+.sidebar-nav__group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-nav__item:hover,
+.sidebar-nav__group:hover {
+  background: var(--bg-elevated);
+}
+
+.sidebar-nav__item--active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.sidebar-nav__item--active:hover {
+  background: var(--accent);
+}
+
+.sidebar-nav__subgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-nav__item--sub {
+  padding-left: 30px;
+  font-size: 14px;
+}
+
+.sidebar-nav__chevron {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+}
+
+.sidebar-nav__chevron--open {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-nav__chevron {
+    transition: none;
+  }
+}
+
+@media (max-width: 480px) and (prefers-reduced-motion: reduce) {
+  .app-sidebar {
+    transition: none;
+  }
+}
+
+/* Botón de hamburguesa y fondo oscurecido del menú móvil: solo existen
+   visualmente bajo el breakpoint de 480px (ver ahí su forma real). En
+   escritorio no ocupan espacio ni se pintan. */
+.sidebar-toggle,
+.sidebar-backdrop {
+  display: none;
+}
+
+.app-header {
+  grid-area: header;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.app-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.app-subtitle {
+  margin: 2px 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.date-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.date-toolbar__nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-pill);
+  padding: 4px;
+}
+
+.date-toolbar__step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.date-toolbar__step:hover {
+  background: rgb(0 122 255 / 12%);
+}
+
+.date-toolbar__step:active {
+  transform: scale(0.96);
+}
+
+.date-toolbar__step:disabled {
+  color: var(--text-tertiary);
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: transparent;
+}
+
+.date-field {
+  display: inline-flex;
+}
+
+.date-input {
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  padding: 8px 6px;
+  border-radius: var(--radius-sm);
+  min-width: 128px;
+  text-align: center;
+}
+
+.date-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pill-button {
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 9px 18px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.pill-button--accent {
+  background: var(--accent);
+  color: #fff;
+}
+
+.pill-button--accent:hover {
+  opacity: 0.9;
+}
+
+.pill-button--accent:active {
+  transform: scale(0.96);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.icon-btn--glass {
+  border: 1px solid var(--border-hairline);
+  background: var(--bg-elevated);
+}
+
+.icon-btn:hover {
+  background: rgb(0 122 255 / 12%);
+}
+
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+.icon-btn:disabled {
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
+.icon-btn__glyph--spinning {
+  display: inline-block;
+  animation: spin 0.9s linear infinite;
+}
+
+.app-main {
+  grid-area: main;
+  padding: 20px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.today-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.inline-alert {
+  color: var(--status-danger);
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.state-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 56px 24px;
+  text-align: center;
+  color: var(--text-secondary);
+  border-radius: var(--radius-lg);
+  margin: 0;
+}
+
+.state-card--error {
+  color: var(--status-danger);
+}
+
+.spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid var(--border-hairline);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .icon-btn__glyph--spinning {
+    animation-duration: 2.4s;
+  }
+}
+
+/* Tabla de trenes, con aspecto de tarjeta "grouped list" de iOS. */
+.table-card {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.train-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 720px;
+  font-size: 14px;
+}
+
+.train-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-elevated);
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-hairline);
+  white-space: nowrap;
+}
+
+.train-table tbody td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-hairline);
+  color: var(--text-primary);
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.train-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.train-table tbody tr:hover td {
+  background: rgb(0 122 255 / 5%);
+}
+
+/* Primera columna "congelada" al desplazar la tabla horizontalmente en
+   pantallas estrechas, para no perder de vista a qué tren pertenece cada
+   fila (patrón de columna fija tipo hoja de cálculo). */
+.train-table th:first-child,
+.train-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-elevated);
+  border-right: 1px solid var(--border-hairline);
+}
+
+.train-table thead th:first-child {
+  z-index: 2;
+}
+
+.cell-primary {
+  font-weight: 600;
+}
+
+.train-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: rgb(0 122 255 / 12%);
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.train-chip:hover {
+  background: rgb(0 122 255 / 20%);
+}
+
+.train-chip:active {
+  transform: scale(0.95);
+}
+
+.sentido-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgb(120 120 128 / 12%);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+}
+
+.status-pill--ok {
+  background: rgb(52 199 89 / 16%);
+  color: var(--status-ok);
+}
+
+.status-pill--warn {
+  background: rgb(255 149 0 / 18%);
+  color: var(--status-warn);
+}
+
+.status-pill--danger {
+  background: rgb(255 59 48 / 16%);
+  color: var(--status-danger);
+}
+
+.status-pill--neutral {
+  background: rgb(120 120 128 / 12%);
+  color: var(--text-secondary);
+}
+
+.claim-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.claim-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-hairline);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  width: fit-content;
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.claim-btn:hover {
+  background: rgb(0 122 255 / 10%);
+}
+
+.claim-btn:active {
+  transform: scale(0.96);
+}
+
+/* ── Estadísticas: gráfico de tipo queso de tramos de retraso ───────────── */
+.donut-chart {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.donut-chart__plot {
+  position: relative;
+  width: 100%;
+  max-width: 260px;
+}
+
+.donut-chart__center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.donut-chart__center-value {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.donut-chart__center-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.donut-chart__legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+  width: 100%;
+  max-width: 360px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.donut-chart__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.donut-chart__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.donut-chart__legend-label {
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.donut-chart__legend-value {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.donut-chart__tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.donut-chart__tooltip-value {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.donut-chart__tooltip-label {
+  color: var(--text-secondary);
+}
+
+/* "Por trenes": lista agrupada por día de la semana. */
+.weekday-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.weekday-group__title {
+  margin: 0 0 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.weekday-group__trains {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.weekday-group__chip {
+  border: 1px solid var(--border-hairline);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.weekday-group__chip:hover {
+  background: rgb(0 122 255 / 10%);
+}
+
+.weekday-group__chip:active {
+  transform: scale(0.96);
+}
+
+/* Resumen de estadísticas (modal de tren, vista semanal/mensual, global):
+   pares etiqueta/valor tipo "grouped list", reutilizado en las 3 vistas. */
+.train-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.stats-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.stats-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.stats-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.stats-row dt {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.stats-row dd {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* "Por tiempos": toggle Semanas/Meses + selector de periodo. */
+.segmented-control {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  border-radius: var(--radius-pill);
+  margin-top: 12px;
+}
+
+.segmented-control__option {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 18px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.segmented-control__option--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.period-select-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.period-select {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  margin-bottom: 24px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+}
+
+.period-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Hoja modal (mapa en vivo), estilo "sheet" de iOS: pegada al borde inferior
+   en móvil, tarjeta centrada en pantallas grandes. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 40%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 1000;
+  animation: fade-in 0.2s ease;
+}
+
+.modal-sheet {
+  width: 100%;
+  max-width: 640px;
+  max-height: 88dvh;
+  overflow: auto;
+  border-radius: 24px 24px 0 0;
+  padding: 12px 20px 20px;
+  animation: slide-up 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-grabber {
+  width: 36px;
+  height: 5px;
+  border-radius: var(--radius-pill);
+  background: var(--border-hairline);
+  margin: 0 auto 12px;
+}
+
+@media (min-width: 640px) {
+  .modal-backdrop {
+    align-items: center;
+    padding: 20px;
+  }
+
+  .modal-sheet {
+    border-radius: 24px;
+  }
+
+  .modal-grabber {
+    display: none;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal-sheet {
+    animation: fade-in 0.15s ease;
+  }
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.map-wrap {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  height: 60vh;
+}
+
+.leaflet-fill {
+  height: 100%;
+  width: 100%;
+}
+
+@media (max-width: 480px) {
+  /* En pantallas estrechas no cabe una columna de menú lateral fija: pasa a
+     ser el menú hamburguesa clásico — oculto fuera de pantalla por
+     defecto, se desliza como overlay al pulsar el botón de arriba a la
+     izquierda, con un fondo oscurecido detrás que también lo cierra al
+     tocarlo. Seleccionar cualquier opción cierra el menú (ver Sidebar.tsx). */
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas: "header" "main";
+  }
+
+  /* Hueco a la izquierda del título para que el botón de hamburguesa
+     (fixed, ver .sidebar-toggle) no quede encima del texto del header. */
+  .app-header {
+    padding-left: 64px;
+  }
+
+  .sidebar-toggle {
+    display: flex;
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    z-index: 25;
+  }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgb(0 0 0 / 40%);
+    animation: fade-in 0.2s ease;
+  }
+
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 40;
+    width: 78vw;
+    max-width: 300px;
+    transform: translateX(-100%);
+    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .app-sidebar--open {
+    transform: translateX(0);
+  }
+
+  .sidebar-nav__item,
+  .sidebar-nav__group {
+    font-size: 14px;
+  }
+
+  .app-title {
+    font-size: 22px;
+  }
+
+  .app-main {
+    padding: 14px;
+  }
+
+  /* En pantallas estrechas la fecha central + "Día ant./Día sig." no caben
+     en una línea: se ocultan visualmente las etiquetas (igual que el botón
+     de refrescar de TodayView, que ya usa solo aria-label) y quedan solo
+     los iconos, con el nombre accesible intacto para lectores de pantalla. */
+  .date-toolbar__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .date-toolbar__step {
+    padding: 10px;
+  }
+
+  .date-input {
+    min-width: 92px;
+    font-size: 14px;
+    padding: 8px 2px;
+  }
+
+  /* Anchos fijos para que Tren/Sentido/Hora programada/Hora real/Retraso
+     quepan sin scroll en una pantalla de móvil estrecha; el texto que no
+     entra pasa a varias líneas en vez de ensanchar la columna. Solo "Hora
+     de paso por Zamora" (última columna a propósito, ver TrainTable.tsx)
+     queda fuera de la vista inicial y requiere desplazar la tabla. */
+  .train-table {
+    table-layout: fixed;
+    width: auto;
+    min-width: 0;
+    font-size: 12px;
+  }
+
+  /* Especificidad igual o mayor que ".train-table thead th" (que fija
+     white-space: nowrap para desktop): si no, ese nowrap gana por
+     especificidad y el texto sin envolver fuerza la tabla a desbordar por
+     mucho que se fije un ancho de columna (table-layout: fixed no evita el
+     desborde cuando el contenido no puede partirse en varias líneas). */
+  .train-table thead th,
+  .train-table tbody td {
+    white-space: normal;
+    overflow-wrap: break-word;
+    padding: 6px 4px;
+  }
+
+  .train-table thead th {
+    font-size: 9.5px;
+    line-height: 1.2;
+  }
+
+  .train-table th:nth-child(1),
+  .train-table td:nth-child(1) {
+    width: 66px;
+  }
+
+  .train-table th:nth-child(2),
+  .train-table td:nth-child(2) {
+    width: 52px;
+  }
+
+  .train-table th:nth-child(3),
+  .train-table td:nth-child(3) {
+    width: 56px;
+  }
+
+  .train-table th:nth-child(4),
+  .train-table td:nth-child(4) {
+    width: 54px;
+  }
+
+  .train-table th:nth-child(5),
+  .train-table td:nth-child(5) {
+    width: 72px;
+  }
+
+  .train-table th:nth-child(6),
+  .train-table td:nth-child(6) {
+    width: 90px;
+  }
+
+  /* Los elementos inline-flex (chips/badges/botones) tienen un ancho
+     mínimo automático basado en su contenido que por defecto ignora el
+     ancho fijado a la celda; sin min-width: 0 seguirían empujando la
+     columna a desbordar aunque el texto ya envuelva en varias líneas. */
+  .sentido-badge,
+  .status-pill,
+  .train-chip {
+    min-width: 0;
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .train-chip svg {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+  }
+
+  .claim-actions {
+    margin-top: 5px;
+  }
+
+  .claim-btn {
+    min-width: 0;
+    white-space: normal;
+    font-size: 9px;
+    padding: 3px 5px;
+    gap: 3px;
+  }
+}
