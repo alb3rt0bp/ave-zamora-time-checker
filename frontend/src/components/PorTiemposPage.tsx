@@ -17,11 +17,11 @@ async function loadPageData(): Promise<PageData> {
   return { weeks, months };
 }
 
-function weekKey(week: WeekMetrics): string {
+export function weekKey(week: WeekMetrics): string {
   return `${week.iso_year}-W${week.iso_week}`;
 }
 
-function weekLabel(week: WeekMetrics): string {
+export function weekLabel(week: WeekMetrics): string {
   return `${formatShortDate(week.week_start)} - ${formatShortDate(week.week_end)} de ${week.iso_year}`;
 }
 
@@ -104,7 +104,7 @@ interface PeriodSectionProps<T extends DelayBuckets> {
   emptyMessage: string;
 }
 
-function PeriodSection<T extends DelayBuckets>({
+export function PeriodSection<T extends DelayBuckets>({
   periods,
   getKey,
   getLabel,

@@ -47,6 +47,17 @@ describe("Sidebar", () => {
     expect(onSelectSection).toHaveBeenCalledWith("estadisticas-tiempos");
   });
 
+  it("calls onSelectSection with 'estadisticas-trenes' when 'Por trenes' is clicked", async () => {
+    const user = userEvent.setup();
+    const onSelectSection = vi.fn();
+    render(<Sidebar activeSection="seguimiento" onSelectSection={onSelectSection} />);
+
+    await user.click(screen.getByRole("button", { name: "Estadísticas" }));
+    await user.click(screen.getByRole("button", { name: "Por trenes" }));
+
+    expect(onSelectSection).toHaveBeenCalledWith("estadisticas-trenes");
+  });
+
   it("calls onSelectSection when 'Seguimiento de trenes' is clicked", async () => {
     const user = userEvent.setup();
     const onSelectSection = vi.fn();
@@ -114,6 +125,16 @@ describe("Sidebar", () => {
       await user.click(container.querySelector(".sidebar-backdrop")!);
 
       expect(asideEl(container)).not.toHaveClass("app-sidebar--open");
+    });
+
+    it("stays open when a key other than Escape is pressed", async () => {
+      const user = userEvent.setup();
+      const { container } = render(<Sidebar activeSection="seguimiento" onSelectSection={vi.fn()} />);
+
+      await user.click(screen.getByRole("button", { name: "Abrir menú" }));
+      await user.keyboard("{ArrowDown}");
+
+      expect(asideEl(container)).toHaveClass("app-sidebar--open");
     });
 
     it("closes when Escape is pressed", async () => {

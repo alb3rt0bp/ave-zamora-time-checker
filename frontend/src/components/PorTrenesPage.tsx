@@ -83,14 +83,17 @@ function PorTrenesList({ schedule, onSelectTrain }: PorTrenesListProps) {
   }
 
   const groups = groupByWeekdayGroup(schedule);
+  const visibleGroups = WEEKDAY_GROUPS.map((group) => ({ group, trains: groups.get(group.key) ?? [] })).filter(
+    ({ trains }) => trains.length > 0,
+  );
 
   return (
     <div className="weekday-groups">
-      {WEEKDAY_GROUPS.filter((group) => (groups.get(group.key) ?? []).length > 0).map((group) => (
+      {visibleGroups.map(({ group, trains }) => (
         <section key={group.key} className="weekday-group">
           <h2 className="weekday-group__title">{group.label}</h2>
           <div className="weekday-group__trains">
-            {(groups.get(group.key) ?? []).map((train) => (
+            {trains.map((train) => (
               <button
                 key={train.cod_comercial}
                 type="button"

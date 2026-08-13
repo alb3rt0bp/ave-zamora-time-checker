@@ -153,6 +153,22 @@ describe("TrainMapModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("does not call onClose when a key other than Escape is pressed", async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <TrainMapModal
+        {...baseProps}
+        flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
+        onClose={onClose}
+      />,
+    );
+
+    await user.keyboard("{Enter}");
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("moves the marker when the fleet data refreshes with a new position", () => {
     const { rerender } = render(
       <TrainMapModal
@@ -218,5 +234,46 @@ describe("TrainMapModal", () => {
     const html = screen.getByTestId("marker").getAttribute("data-icon-html") ?? "";
     expect(html).toContain("🚄");
     expect(html).not.toContain("train-marker-icon__glyph--right");
+  });
+
+  it("skips the fly-to animation when the user prefers reduced motion", () => {
+    flyToSpy.mockClear();
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+
+    render(
+      <TrainMapModal
+        {...baseProps}
+        flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(flyToSpy).toHaveBeenCalledWith([41.5, -5.74], expect.any(Number), { duration: 0 });
+    window.matchMedia = originalMatchMedia;
+  });
+
+  it("omits the departure/arrival items when their times are not known", () => {
+    render(
+      <TrainMapModal
+        {...baseProps}
+        horaSalida={null}
+        horaLlegada={null}
+        flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/Salida/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Llegada/)).not.toBeInTheDocument();
   });
 });

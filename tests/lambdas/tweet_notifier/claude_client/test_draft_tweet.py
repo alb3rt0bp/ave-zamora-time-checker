@@ -96,6 +96,14 @@ class TestDraftTweet(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 claude_client.draft_tweet(ALERT, SAMPLE_LOG_EXTRA)
 
+    def test_raises_when_end_turn_response_has_no_text_block(self):
+        with patch.object(
+            claude_client.bedrock_runtime, "invoke_model",
+            return_value=fake_refusal_response(stop_reason="end_turn"),
+        ):
+            with self.assertRaises(RuntimeError):
+                claude_client.draft_tweet(ALERT, SAMPLE_LOG_EXTRA)
+
 
 if __name__ == "__main__":
     unittest.main()

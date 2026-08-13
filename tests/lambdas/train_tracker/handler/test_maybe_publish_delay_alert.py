@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from tests.dummies.handler_test_case import HandlerTestCase
@@ -78,6 +79,10 @@ class TestMaybePublishDelayAlert(HandlerTestCase):
             "fecha": NOW.date().isoformat(),
             "es_tren_madrugador": True,
         })
+
+    def test_does_not_raise_when_sns_publish_fails(self):
+        with patch.object(self.handler.sns, "publish", side_effect=Exception("boom")):
+            self.handler._maybe_publish_delay_alert(SCHEDULED, 20, "08:50", NOW, SAMPLE_LOG_EXTRA)
 
 
 if __name__ == "__main__":

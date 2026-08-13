@@ -36,6 +36,20 @@ class TestGetDayHandler(ApiHandlerTestCase):
         self.assertEqual(body[0]["cod_comercial"], "04154")
         self.assertEqual(body[0]["minutos_retraso"], 6)
 
+    def test_skips_blank_lines_in_jsonl_body(self):
+        self.s3.put_object(
+            Bucket=self.handler.S3_BUCKET,
+            Key=PAST_DATE_KEY,
+            Body=b'{"cod_comercial": "04154"}\n\n{"cod_comercial": "04475"}\n',
+            ContentType="application/x-ndjson",
+        )
+        event = {"pathParameters": {"date": PAST_DATE_ISO}}
+
+        response = self.handler.get_day_handler(event, FakeContext())
+
+        body = json.loads(response["body"])
+        self.assertEqual([r["cod_comercial"] for r in body], ["04154", "04475"])
+
     def test_returns_404_when_day_not_dumped_yet(self):
         event = {"pathParameters": {"date": PAST_DATE_ISO}}
 

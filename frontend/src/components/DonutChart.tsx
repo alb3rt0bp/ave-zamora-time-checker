@@ -51,7 +51,7 @@ function bucketPct(buckets: DelayBuckets, key: DelayBucketKey): number {
   }
 }
 
-function DonutTooltip({ active, payload }: TooltipContentProps) {
+export function DonutTooltip({ active, payload }: TooltipContentProps) {
   if (!active || !payload || payload.length === 0) return null;
   const slice = payload[0]?.payload as Slice | undefined;
   if (!slice) return null;

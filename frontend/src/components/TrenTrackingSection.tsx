@@ -25,9 +25,10 @@ export function TrenTrackingSection() {
   }
 
   function goToNextDay() {
-    if (selectedDate === "") return; // ya estamos en el día más reciente posible
-    // Desde el último día volcado (maxDate), el "siguiente" es hoy: vuelve a
-    // la vista en vivo en vez de pedir /trains/{hoy}, que todavía no existe.
+    // Solo se puede pulsar con selectedDate ya fijado a un día pasado (el
+    // botón va disabled en "hoy", ver más abajo). Desde el último día
+    // volcado (maxDate), el "siguiente" es hoy: vuelve a la vista en vivo en
+    // vez de pedir /trains/{hoy}, que todavía no existe.
     setSelectedDate(selectedDate === maxDate ? "" : addDaysIso(selectedDate, 1));
   }
 

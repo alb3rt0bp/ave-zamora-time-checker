@@ -132,6 +132,60 @@ class TestDailyDumpHandler(HandlerTestCase):
 
         self.assertEqual(result["written"], 0)
 
+    def test_follows_pagination_across_multiple_scan_pages(self):
+        self.table.put_item(Item={
+            "pk": f"M100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "M100",
+            "sentido": "Madrid",
+            "tipo_dia": "laborable",
+            "hora_programada": "08:30",
+            "ult_retraso": 0,
+            "entregado": True,
+        })
+        self.table.put_item(Item={
+            "pk": f"G100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "G100",
+            "sentido": "Galicia",
+            "tipo_dia": "laborable",
+            "hora_programada": "09:30",
+            "ult_retraso": 0,
+            "entregado": True,
+        })
+
+        real_scan = self.handler.state_table.scan
+        first_resp = real_scan(FilterExpression="attribute_exists(cod_comercial)")
+        # Fuerza una segunda página devolviendo los items de a uno.
+        first_page = {"Items": first_resp["Items"][:1], "LastEvaluatedKey": {"pk": "fake"}}
+        second_page = {"Items": first_resp["Items"][1:]}
+
+        with patch.object(self.handler.state_table, "scan", side_effect=[first_page, second_page]) as mock_scan:
+            with patch("handler.datetime", self._frozen()):
+                result = self.handler.daily_dump_handler({}, FakeContext())
+
+        self.assertEqual(mock_scan.call_count, 2)
+        self.assertEqual(mock_scan.call_args_list[1].kwargs["ExclusiveStartKey"], {"pk": "fake"})
+        self.assertEqual(result["written"], 2)
+
+    def test_metrics_writer_failure_does_not_fail_dump(self):
+        self.table.put_item(Item={
+            "pk": f"M100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "M100",
+            "sentido": "Madrid",
+            "tipo_dia": "laborable",
+            "hora_programada": "08:30",
+            "hora_llegada_corregida": "08:35",
+            "hora_paso_zamora": "07:03",
+            "ult_retraso": 5,
+            "entregado": True,
+        })
+
+        with patch("handler.MetricsWriter", side_effect=Exception("boom")):
+            with patch("handler.datetime", self._frozen()):
+                result = self.handler.daily_dump_handler({}, FakeContext())
+
+        self.assertEqual(result["written"], 1)
+        self.assertIn("key", result)
+
     def test_excludes_entregado_trains_from_a_different_day(self):
         self.table.put_item(Item={
             "pk": f"M100#2026-01-04",

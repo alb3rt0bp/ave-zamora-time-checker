@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { server } from "../mocks/server";
 import { useTrainSchedule } from "./useTrainSchedule";
 
@@ -35,5 +35,27 @@ describe("useTrainSchedule", () => {
     // No hay forma determinista de esperar "no cambiará nunca"; se comprueba
     // el estado inicial, que es el único que puede darse tras un fallo.
     expect(result.current.size).toBe(0);
+  });
+
+  it("ignores a response that resolves after unmounting", async () => {
+    let resolveResponse!: () => void;
+    const responseReady = new Promise<void>((resolve) => {
+      resolveResponse = resolve;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/trains/schedule`, async () => {
+        await responseReady;
+        return HttpResponse.json([]);
+      }),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderHook(() => useTrainSchedule());
+    unmount();
+    resolveResponse();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

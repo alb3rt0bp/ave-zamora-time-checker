@@ -75,4 +75,28 @@ describe("useRenfeFlota", () => {
 
     expect(result.current.get("04154")).toEqual({ codComercial: "04154", latitud: 41.5, longitud: -5.74 });
   });
+
+  it("ignores a poll response that resolves after unmounting", async () => {
+    let resolveResponse!: () => void;
+    const responseReady = new Promise<void>((resolve) => {
+      resolveResponse = resolve;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/renfe/flota`, async () => {
+        await responseReady;
+        return HttpResponse.json({ fechaActualizacion: "2026-01-05T07:47:00", trenes: [] });
+      }),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderHook(() => useRenfeFlota());
+    unmount();
+    resolveResponse();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
 });

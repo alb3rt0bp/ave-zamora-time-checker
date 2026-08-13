@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { delay, http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { server } from "../mocks/server";
 import { TodayView } from "./TodayView";
 
@@ -104,5 +104,22 @@ describe("TodayView", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/no se han podido cargar/i);
     expect(screen.getByText("04154")).toBeInTheDocument();
+  });
+
+  it("ignores a failed response that resolves after the component has unmounted", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/trains/today`, async () => {
+        await delay(20);
+        return new HttpResponse(null, { status: 500 });
+      }),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = render(<TodayView />);
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

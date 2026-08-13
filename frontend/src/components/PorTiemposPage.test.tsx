@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import { server } from "../mocks/server";
-import { PorTiemposPage } from "./PorTiemposPage";
+import { PeriodSection, PorTiemposPage, weekKey, weekLabel } from "./PorTiemposPage";
 
 const API_BASE_URL = "http://localhost:3000";
 
@@ -123,6 +123,23 @@ describe("PorTiemposPage", () => {
     expect(screen.getByText(/340 min/)).toBeInTheDocument();
   });
 
+  it("switches back to the week selector when the 'Semanas' tab is clicked", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/metrics/weeks`, () => HttpResponse.json([weekFixture()])),
+      http.get(`${API_BASE_URL}/metrics/months`, () => HttpResponse.json([monthFixture()])),
+    );
+    const user = userEvent.setup();
+
+    render(<PorTiemposPage />);
+    await screen.findByLabelText(/selecciona una semana/i);
+    await user.click(screen.getByRole("button", { name: "Meses" }));
+    await screen.findByLabelText(/selecciona un mes/i);
+
+    await user.click(screen.getByRole("button", { name: "Semanas" }));
+
+    expect(await screen.findByLabelText(/selecciona una semana/i)).toBeInTheDocument();
+  });
+
   it("includes the current, incomplete month in the selector", async () => {
     server.use(
       http.get(`${API_BASE_URL}/metrics/weeks`, () => HttpResponse.json([weekFixture()])),
@@ -171,5 +188,26 @@ describe("PorTiemposPage", () => {
     render(<PorTiemposPage />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+});
+
+describe("PeriodSection", () => {
+  const periodProps = {
+    getKey: weekKey,
+    getLabel: weekLabel,
+    selectLabel: "Selecciona una semana completa",
+    emptyMessage: "Todavía no hay ninguna semana completa (lunes a domingo).",
+  };
+
+  it("falls back to the last period if the selected one disappears from a later render", () => {
+    const initialWeeks = [weekFixture({ iso_week: 1 }), weekFixture({ iso_week: 2 })];
+    const replacementWeeks = [weekFixture({ iso_week: 9, suma_retraso_significativo_minutos: 42 })];
+
+    const { rerender } = render(<PeriodSection periods={initialWeeks} {...periodProps} />);
+    expect(screen.getByText(/95 min/)).toBeInTheDocument();
+
+    rerender(<PeriodSection periods={replacementWeeks} {...periodProps} />);
+
+    expect(screen.getByText(/42 min/)).toBeInTheDocument();
   });
 });

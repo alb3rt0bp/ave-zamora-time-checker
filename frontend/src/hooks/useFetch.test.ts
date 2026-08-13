@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { NotFoundError } from "../api";
 import { useFetch } from "./useFetch";
 
@@ -41,5 +41,37 @@ describe("useFetch", () => {
     rerender({ dep: 2 });
 
     await waitFor(() => expect(result.current).toEqual({ status: "ok", data: 2 }));
+  });
+
+  it("ignores a resolved fetch after unmounting", async () => {
+    let resolveFetch!: (value: number) => void;
+    const pending = new Promise<number>((resolve) => {
+      resolveFetch = resolve;
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderHook(() => useFetch(() => pending, []));
+    unmount();
+    resolveFetch(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("ignores a rejected fetch after unmounting", async () => {
+    let rejectFetch!: (err: unknown) => void;
+    const pending = new Promise<number>((_resolve, reject) => {
+      rejectFetch = reject;
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderHook(() => useFetch(() => pending, []));
+    unmount();
+    rejectFetch(new Error("boom"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

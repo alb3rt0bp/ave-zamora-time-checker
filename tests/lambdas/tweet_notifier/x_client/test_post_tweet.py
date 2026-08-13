@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from tests.dummies import tweet_notifier_env  # noqa: F401 - sys.path setup
-from tests.dummies.fake_http import fake_urlopen_json, raise_http_error
+from tests.dummies.fake_http import fake_urlopen_json, raise_http_error, raise_url_error
 from x_client import XClient
 
 CREDENTIALS = {
@@ -38,6 +38,11 @@ class TestPostTweet(unittest.TestCase):
 
     def test_reraises_http_error(self):
         with patch("urllib.request.urlopen", side_effect=raise_http_error):
+            with self.assertRaises(Exception):
+                self.client.post_tweet("hola")
+
+    def test_reraises_url_error(self):
+        with patch("urllib.request.urlopen", side_effect=raise_url_error):
             with self.assertRaises(Exception):
                 self.client.post_tweet("hola")
 

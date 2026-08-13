@@ -139,6 +139,43 @@ describe("PorTrenesPage", () => {
     expect(await screen.findByText(/todavía no hay datos/i)).toBeInTheDocument();
   });
 
+  it("closes the stats modal when the close button is clicked", async () => {
+    mockHappyPath();
+    const user = userEvent.setup();
+    render(<PorTrenesPage />);
+
+    await user.click(await screen.findByText("04154 · Madrid"));
+    await screen.findByRole("dialog", { name: /04154/ });
+
+    await user.click(screen.getByRole("button", { name: "Cerrar" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows an empty state when there is no schedule at all", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/trains/schedule`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/metrics/trains`, () => HttpResponse.json([])),
+      http.get(`${API_BASE_URL}/metrics/global`, () => HttpResponse.json(GLOBAL_METRICS)),
+    );
+
+    render(<PorTrenesPage />);
+
+    expect(await screen.findByText("No hay trenes en el horario.")).toBeInTheDocument();
+  });
+
+  it("propagates a real error from /metrics/global instead of swallowing it", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/trains/schedule`, () => HttpResponse.json(SCHEDULE)),
+      http.get(`${API_BASE_URL}/metrics/trains`, () => HttpResponse.json(TRAIN_METRICS)),
+      http.get(`${API_BASE_URL}/metrics/global`, () => new HttpResponse(null, { status: 500 })),
+    );
+
+    render(<PorTrenesPage />);
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
   it("still renders the train list when /metrics/global has no data yet", async () => {
     server.use(
       http.get(`${API_BASE_URL}/trains/schedule`, () => HttpResponse.json(SCHEDULE)),

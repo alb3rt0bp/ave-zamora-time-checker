@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { server } from "../mocks/server";
 import { DayView } from "./DayView";
 
@@ -55,5 +55,27 @@ describe("DayView", () => {
     render(<DayView date="2026-01-04" />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
+  it("ignores a response that resolves after the component has unmounted", async () => {
+    let resolveResponse!: () => void;
+    const responseReady = new Promise<void>((resolve) => {
+      resolveResponse = resolve;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/trains/:date`, async () => {
+        await responseReady;
+        return HttpResponse.json([]);
+      }),
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = render(<DayView date="2026-01-04" />);
+    unmount();
+    resolveResponse();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

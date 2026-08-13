@@ -135,6 +135,25 @@ describe("TrainStatsModal", () => {
     expect(onClose).toHaveBeenCalledTimes(3);
   });
 
+  it("does not close when a key other than Escape is pressed", async () => {
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <TrainStatsModal
+        codComercial="04154"
+        schedule={SCHEDULE}
+        metrics={METRICS}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={onClose}
+      />,
+    );
+
+    await user.keyboard("{Enter}");
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("does not close when clicking inside the sheet", async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();

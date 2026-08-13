@@ -52,6 +52,17 @@ class TestLambdaHandler(unittest.TestCase):
         self.assertEqual(result, {"statusCode": 200, "published": 1})
         self.assertEqual(mock_draft.call_count, 2)
 
+    def test_warns_when_tweet_exceeds_280_characters(self):
+        long_text = "x" * 275
+        with self.assertLogs("tweet_notifier", level="WARNING") as logs, patch.object(
+            claude_client, "draft_tweet",
+            return_value={"tweet_text": long_text, "hashtags": ["#ZamoraNecesitaTren"]},
+        ):
+            result = self.module.lambda_handler(_sns_event(ALERT_PAYLOAD), FakeContext())
+
+        self.assertEqual(result, {"statusCode": 200, "published": 1})
+        self.assertTrue(any("supera los 280 caracteres" in message for message in logs.output))
+
     def test_does_not_publish_to_x(self):
         # Modo dry-run: client.post_tweet sigue comentado en el handler real.
         with patch.object(

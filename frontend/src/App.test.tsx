@@ -230,4 +230,28 @@ describe("App", () => {
     expect(screen.getByLabelText(/fecha/i)).toHaveValue(addDaysIso("2026-01-10", -1));
     await screen.findByText("04200");
   });
+
+  it("navigates to each sidebar section", async () => {
+    server.use(http.get(`${API_BASE_URL}/trains/today`, () => HttpResponse.json([])));
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByText(/no hay trenes/i);
+
+    await user.click(screen.getByRole("button", { name: "Horarios de trenes AVE" }));
+    expect(await screen.findByRole("heading", { name: "Horarios de trenes AVE" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Estadísticas" }));
+    await user.click(screen.getByRole("button", { name: "Por trenes" }));
+    expect(await screen.findByRole("heading", { name: "Estadísticas · Por trenes" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Por tiempos" }));
+    expect(await screen.findByRole("heading", { name: "Estadísticas · Por tiempos" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Global" }));
+    expect(await screen.findByRole("heading", { name: "Estadísticas · Global" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Seguimiento de trenes" }));
+    expect(await screen.findByText(/no hay trenes/i)).toBeInTheDocument();
+  });
 });
