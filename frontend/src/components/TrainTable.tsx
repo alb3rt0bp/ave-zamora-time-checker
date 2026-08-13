@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { RenfeTren, TrainRow } from "../types";
+import type { RenfeTren, TrainRow, TrainSchedule } from "../types";
 import { CLAIM_THRESHOLD_MIN, delayStatus, formatDelay } from "../utils/trainFormat";
 import { MapPinIcon } from "./icons";
 import { TrainMapModal } from "./TrainMapModal";
@@ -7,6 +7,7 @@ import { TrainMapModal } from "./TrainMapModal";
 interface TrainTableProps {
   rows: TrainRow[];
   flota?: Map<string, RenfeTren>;
+  schedule?: Map<string, TrainSchedule>;
 }
 
 const POSSIBLE_CLAIM_THRESHOLD_MIN = 60;
@@ -18,7 +19,7 @@ function openInNewTab(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function TrainTable({ rows, flota = new Map() }: TrainTableProps) {
+export function TrainTable({ rows, flota = new Map(), schedule = new Map() }: TrainTableProps) {
   const [openTrainCode, setOpenTrainCode] = useState<string | null>(null);
 
   if (rows.length === 0) {
@@ -26,6 +27,7 @@ export function TrainTable({ rows, flota = new Map() }: TrainTableProps) {
   }
 
   const sortedRows = [...rows].sort((a, b) => a.horaProgramada.localeCompare(b.horaProgramada));
+  const openRow = openTrainCode ? sortedRows.find((row) => row.codComercial === openTrainCode) : undefined;
 
   return (
     <>
@@ -36,8 +38,9 @@ export function TrainTable({ rows, flota = new Map() }: TrainTableProps) {
               <tr>
                 <th>Tren</th>
                 <th>Sentido</th>
-                <th>Hora programada</th>
-                <th>Hora de llegada corregida</th>
+                <th>Hora de salida</th>
+                <th>Hora de llegada</th>
+                <th>Llegada corregida</th>
                 <th>Retraso</th>
                 {/* Última columna a propósito: en móvil es la única que puede
                     quedar fuera de la vista inicial y requerir scroll
@@ -50,6 +53,7 @@ export function TrainTable({ rows, flota = new Map() }: TrainTableProps) {
                 const status = delayStatus(row.retrasoMinutos, row.cancelado);
                 const showClaim = !row.cancelado && row.retrasoMinutos !== null && row.retrasoMinutos > CLAIM_THRESHOLD_MIN;
                 const showPossibleClaim = showClaim && (row.retrasoMinutos as number) > POSSIBLE_CLAIM_THRESHOLD_MIN;
+                const horaSalida = schedule.get(row.codComercial)?.hora_salida ?? null;
 
                 return (
                   <tr key={row.codComercial}>
@@ -70,6 +74,7 @@ export function TrainTable({ rows, flota = new Map() }: TrainTableProps) {
                     <td>
                       <span className="sentido-badge">{row.sentido}</span>
                     </td>
+                    <td>{horaSalida ?? "-"}</td>
                     <td>{row.horaProgramada}</td>
                     <td>
                       {row.cancelado ? (
@@ -113,8 +118,17 @@ export function TrainTable({ rows, flota = new Map() }: TrainTableProps) {
           </table>
         </div>
       </div>
-      {openTrainCode && (
-        <TrainMapModal codComercial={openTrainCode} flota={flota} onClose={() => setOpenTrainCode(null)} />
+      {openRow && (
+        <TrainMapModal
+          codComercial={openRow.codComercial}
+          sentido={openRow.sentido}
+          horaSalida={schedule.get(openRow.codComercial)?.hora_salida ?? null}
+          horaLlegada={openRow.horaProgramada}
+          retrasoMinutos={openRow.retrasoMinutos}
+          cancelado={openRow.cancelado}
+          flota={flota}
+          onClose={() => setOpenTrainCode(null)}
+        />
       )}
     </>
   );

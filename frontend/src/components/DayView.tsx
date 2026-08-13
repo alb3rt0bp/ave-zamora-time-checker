@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchByDate, NotFoundError } from "../api";
-import type { RenfeTren, TrainRow } from "../types";
+import type { RenfeTren, TrainRow, TrainSchedule } from "../types";
 import { normalizeDayTrain } from "../utils/normalizeTrain";
 import { TrainTable } from "./TrainTable";
 
@@ -9,9 +9,10 @@ type Status = "loading" | "ok" | "not-found" | "error";
 interface DayViewProps {
   date: string;
   flota?: Map<string, RenfeTren>;
+  schedule?: Map<string, TrainSchedule>;
 }
 
-export function DayView({ date, flota }: DayViewProps) {
+export function DayView({ date, flota, schedule }: DayViewProps) {
   const [rows, setRows] = useState<TrainRow[]>([]);
   const [status, setStatus] = useState<Status>("loading");
 
@@ -51,5 +52,5 @@ export function DayView({ date, flota }: DayViewProps) {
         No se han podido cargar los trenes de esa fecha.
       </p>
     );
-  return <TrainTable rows={rows} flota={flota} />;
+  return <TrainTable rows={rows} flota={flota} schedule={schedule} />;
 }

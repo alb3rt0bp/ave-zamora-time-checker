@@ -6,15 +6,24 @@ import { TrainMapModal } from "./TrainMapModal";
 
 // jsdom no calcula layout real (el contenedor del mapa mide 0x0), así que
 // leaflet nunca proyecta una posición de píxel concreta para el marcador:
-// se sustituye Marker por un stub que expone su prop `position` tal cual,
-// para poder comprobar que se actualiza al refrescarse la flota.
+// se sustituye Marker por un stub que expone su prop `position` (y el html
+// del icono, para comprobar la orientación del emoji) tal cual, y useMap
+// por un stub cuyo flyTo se puede espiar para comprobar la animación de
+// acercamiento inicial.
+const { flyToSpy } = vi.hoisted(() => ({ flyToSpy: vi.fn() }));
+
 vi.mock("react-leaflet", async () => {
   const actual = await vi.importActual<typeof import("react-leaflet")>("react-leaflet");
   return {
     ...actual,
-    Marker: ({ position }: { position: [number, number] }) => (
-      <div data-testid="marker" data-position={JSON.stringify(position)} />
+    Marker: ({ position, icon }: { position: [number, number]; icon?: { options?: { html?: string } } }) => (
+      <div
+        data-testid="marker"
+        data-position={JSON.stringify(position)}
+        data-icon-html={icon?.options?.html ?? ""}
+      />
     ),
+    useMap: () => ({ flyTo: flyToSpy }),
   };
 });
 
@@ -22,11 +31,20 @@ function flotaWith(train: RenfeTren): Map<string, RenfeTren> {
   return new Map([[train.codComercial, train]]);
 }
 
+const baseProps = {
+  codComercial: "04154",
+  sentido: "Madrid",
+  horaSalida: "07:41",
+  horaLlegada: "08:56",
+  retrasoMinutos: 6,
+  cancelado: false,
+};
+
 describe("TrainMapModal", () => {
   it("renders a dialog naming the selected train", () => {
     render(
       <TrainMapModal
-        codComercial="04154"
+        {...baseProps}
         flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
         onClose={vi.fn()}
       />,
@@ -36,10 +54,37 @@ describe("TrainMapModal", () => {
     expect(screen.getByRole("heading", { name: /tren 04154/i })).toBeInTheDocument();
   });
 
-  it("renders nothing when the train is no longer in the fleet", () => {
-    const { container } = render(
-      <TrainMapModal codComercial="04154" flota={new Map()} onClose={vi.fn()} />,
+  it("shows sentido, scheduled times and delay next to the train code", () => {
+    render(
+      <TrainMapModal
+        {...baseProps}
+        flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
+        onClose={vi.fn()}
+      />,
     );
+
+    expect(screen.getByText("Madrid")).toBeInTheDocument();
+    expect(screen.getByText("Salida 07:41")).toBeInTheDocument();
+    expect(screen.getByText("Llegada 08:56")).toBeInTheDocument();
+    expect(screen.getByText("+6 min")).toBeInTheDocument();
+  });
+
+  it("does not show a delay pill for a cancelled train", () => {
+    render(
+      <TrainMapModal
+        {...baseProps}
+        cancelado
+        retrasoMinutos={null}
+        flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Sin datos")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing when the train is no longer in the fleet", () => {
+    const { container } = render(<TrainMapModal {...baseProps} flota={new Map()} onClose={vi.fn()} />);
 
     expect(container).toBeEmptyDOMElement();
   });
@@ -49,7 +94,7 @@ describe("TrainMapModal", () => {
     const user = userEvent.setup();
     render(
       <TrainMapModal
-        codComercial="04154"
+        {...baseProps}
         flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
         onClose={onClose}
       />,
@@ -65,7 +110,7 @@ describe("TrainMapModal", () => {
     const user = userEvent.setup();
     render(
       <TrainMapModal
-        codComercial="04154"
+        {...baseProps}
         flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
         onClose={onClose}
       />,
@@ -81,7 +126,7 @@ describe("TrainMapModal", () => {
     const user = userEvent.setup();
     render(
       <TrainMapModal
-        codComercial="04154"
+        {...baseProps}
         flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
         onClose={onClose}
       />,
@@ -97,7 +142,7 @@ describe("TrainMapModal", () => {
     const user = userEvent.setup();
     render(
       <TrainMapModal
-        codComercial="04154"
+        {...baseProps}
         flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
         onClose={onClose}
       />,
@@ -111,7 +156,7 @@ describe("TrainMapModal", () => {
   it("moves the marker when the fleet data refreshes with a new position", () => {
     const { rerender } = render(
       <TrainMapModal
-        codComercial="04154"
+        {...baseProps}
         flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
         onClose={vi.fn()}
       />,
@@ -121,12 +166,57 @@ describe("TrainMapModal", () => {
 
     rerender(
       <TrainMapModal
-        codComercial="04154"
+        {...baseProps}
         flota={flotaWith({ codComercial: "04154", latitud: 43.0, longitud: -8.0 })}
         onClose={vi.fn()}
       />,
     );
 
     expect(screen.getByTestId("marker")).toHaveAttribute("data-position", JSON.stringify([43.0, -8.0]));
+  });
+
+  it("animates the map into the target scale on load", () => {
+    flyToSpy.mockClear();
+
+    render(
+      <TrainMapModal
+        {...baseProps}
+        flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(flyToSpy).toHaveBeenCalledTimes(1);
+    expect(flyToSpy).toHaveBeenCalledWith([41.5, -5.74], expect.any(Number), expect.any(Object));
+  });
+
+  it("uses a train emoji marker pointing right for Madrid-bound trains", () => {
+    render(
+      <TrainMapModal
+        {...baseProps}
+        sentido="Madrid"
+        flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const html = screen.getByTestId("marker").getAttribute("data-icon-html") ?? "";
+    expect(html).toContain("🚄");
+    expect(html).toContain("train-marker-icon__glyph--right");
+  });
+
+  it("uses a train emoji marker pointing left for Galicia-bound trains", () => {
+    render(
+      <TrainMapModal
+        {...baseProps}
+        sentido="Galicia"
+        flota={flotaWith({ codComercial: "04154", latitud: 41.5, longitud: -5.74 })}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const html = screen.getByTestId("marker").getAttribute("data-icon-html") ?? "";
+    expect(html).toContain("🚄");
+    expect(html).not.toContain("train-marker-icon__glyph--right");
   });
 });

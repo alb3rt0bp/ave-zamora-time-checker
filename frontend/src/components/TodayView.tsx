@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { fetchToday } from "../api";
-import type { RenfeTren, TrainRow } from "../types";
+import type { RenfeTren, TrainRow, TrainSchedule } from "../types";
 import { normalizeTodayTrain } from "../utils/normalizeTrain";
 import { TrainTable } from "./TrainTable";
 
 interface TodayViewProps {
   flota?: Map<string, RenfeTren>;
+  schedule?: Map<string, TrainSchedule>;
 }
 
-export function TodayView({ flota }: TodayViewProps) {
+export function TodayView({ flota, schedule }: TodayViewProps) {
   const [rows, setRows] = useState<TrainRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -77,7 +78,7 @@ export function TodayView({ flota }: TodayViewProps) {
           {error}
         </p>
       )}
-      <TrainTable rows={rows} flota={flota} />
+      <TrainTable rows={rows} flota={flota} schedule={schedule} />
     </div>
   );
 }

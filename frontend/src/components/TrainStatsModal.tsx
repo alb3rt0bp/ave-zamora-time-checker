@@ -1,10 +1,11 @@
 import { useEffect } from "react";
-import type { TrainMetrics } from "../types";
+import type { TrainMetrics, TrainSchedule } from "../types";
 import { formatSpanishDate } from "../utils/metricsFormat";
 import { DonutChart } from "./DonutChart";
 
 interface TrainStatsModalProps {
   codComercial: string;
+  schedule: TrainSchedule | undefined;
   metrics: TrainMetrics | undefined;
   firstAggregatedDate: string | undefined;
   thresholdMinutes: number | undefined;
@@ -15,6 +16,7 @@ interface TrainStatsModalProps {
 // Escape), con estadísticas del tren en vez de su posición en vivo.
 export function TrainStatsModal({
   codComercial,
+  schedule,
   metrics,
   firstAggregatedDate,
   thresholdMinutes,
@@ -39,7 +41,15 @@ export function TrainStatsModal({
       <div className="modal-sheet glass" onClick={(event) => event.stopPropagation()}>
         <div className="modal-grabber" aria-hidden="true" />
         <div className="modal-header">
-          <h2 className="modal-title">Tren {codComercial}</h2>
+          <div>
+            <h2 className="modal-title">Tren {codComercial}</h2>
+            {schedule && (
+              <p className="modal-subtitle">
+                <span className="modal-subtitle__item">Salida {schedule.hora_salida}</span>
+                <span className="modal-subtitle__item">Llegada {schedule.hora_llegada_destino}</span>
+              </p>
+            )}
+          </div>
           <button type="button" className="icon-btn icon-btn--glass" onClick={onClose} aria-label="Cerrar">
             ✕
           </button>

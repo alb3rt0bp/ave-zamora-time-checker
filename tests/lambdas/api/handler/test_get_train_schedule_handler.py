@@ -19,8 +19,12 @@ class TestGetTrainScheduleHandler(ApiHandlerTestCase):
         # tests/dummies/train_schedules_sample.json: M100/G100 (laborable), M200/G200 (domingo).
         self.assertEqual(set(by_cod), {"M100", "G100", "M200", "G200"})
         self.assertEqual(by_cod["M100"]["sentido"], "Madrid")
+        self.assertEqual(by_cod["M100"]["hora_salida"], "07:00")
+        self.assertEqual(by_cod["M100"]["hora_llegada_destino"], "08:30")
         self.assertEqual(by_cod["M100"]["weekdays"], [0, 1, 2, 3, 4])
         self.assertEqual(by_cod["G200"]["sentido"], "Galicia")
+        self.assertEqual(by_cod["G200"]["hora_salida"], "10:00")
+        self.assertEqual(by_cod["G200"]["hora_llegada_destino"], "11:20")
         self.assertEqual(by_cod["G200"]["weekdays"], [6])
 
     def test_sorted_by_cod_comercial(self):
@@ -35,13 +39,38 @@ class TestGetTrainScheduleHandler(ApiHandlerTestCase):
         # y otra domingo), sin depender del fixture cargado como
         # SCHEDULES_FILE en este proceso de test.
         trains = [
-            {"cod_comercial": "X1", "sentido": "Madrid", "tipo_dia": "laborable", "weekdays": [0, 1, 2, 3, 4]},
-            {"cod_comercial": "X1", "sentido": "Madrid", "tipo_dia": "domingo", "weekdays": [6]},
+            {
+                "cod_comercial": "X1",
+                "sentido": "Madrid",
+                "tipo_dia": "laborable",
+                "weekdays": [0, 1, 2, 3, 4],
+                "hora_salida": "07:41",
+                "hora_llegada_destino": "09:10",
+            },
+            {
+                "cod_comercial": "X1",
+                "sentido": "Madrid",
+                "tipo_dia": "domingo",
+                "weekdays": [6],
+                "hora_salida": "07:41",
+                "hora_llegada_destino": "09:10",
+            },
         ]
 
         index = self.handler._build_train_schedule_index(trains)
 
-        self.assertEqual(index, [{"cod_comercial": "X1", "sentido": "Madrid", "weekdays": [0, 1, 2, 3, 4, 6]}])
+        self.assertEqual(
+            index,
+            [
+                {
+                    "cod_comercial": "X1",
+                    "sentido": "Madrid",
+                    "hora_salida": "07:41",
+                    "hora_llegada_destino": "09:10",
+                    "weekdays": [0, 1, 2, 3, 4, 6],
+                }
+            ],
+        )
 
 
 if __name__ == "__main__":

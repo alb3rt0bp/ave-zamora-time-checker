@@ -130,12 +130,15 @@ export interface GlobalMetrics extends DelayBuckets {
 export interface TrainSchedule {
   cod_comercial: string;
   sentido: string;
+  hora_salida: string;
+  hora_llegada_destino: string;
   weekdays: number[]; // 0=lunes .. 6=domingo
 }
 
 // ── Navegación del menú lateral ──────────────────────────────────────────
 export type AppSection =
   | "seguimiento"
+  | "horarios"
   | "estadisticas-trenes"
   | "estadisticas-tiempos"
   | "estadisticas-global";

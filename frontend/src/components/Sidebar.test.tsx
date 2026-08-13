@@ -57,7 +57,22 @@ describe("Sidebar", () => {
     expect(onSelectSection).toHaveBeenCalledWith("seguimiento");
   });
 
-  describe("menú móvil (hamburguesa)", () => {
+  it("marks 'Horarios de trenes AVE' as current and calls onSelectSection when clicked", async () => {
+    const user = userEvent.setup();
+    const onSelectSection = vi.fn();
+    render(<Sidebar activeSection="horarios" onSelectSection={onSelectSection} />);
+
+    expect(screen.getByRole("button", { name: "Horarios de trenes AVE" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Horarios de trenes AVE" }));
+
+    expect(onSelectSection).toHaveBeenCalledWith("horarios");
+  });
+
+  describe("menú de hamburguesa (overlay en cualquier tamaño de pantalla)", () => {
     function asideEl(container: HTMLElement): HTMLElement {
       return container.querySelector(".app-sidebar") as HTMLElement;
     }

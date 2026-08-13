@@ -1,8 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { TrainMetrics } from "../types";
+import type { TrainMetrics, TrainSchedule } from "../types";
 import { TrainStatsModal } from "./TrainStatsModal";
+
+const SCHEDULE: TrainSchedule = {
+  cod_comercial: "04154",
+  sentido: "Madrid",
+  hora_salida: "06:56",
+  hora_llegada_destino: "08:56",
+  weekdays: [0, 1, 2, 3, 4],
+};
 
 const METRICS: TrainMetrics = {
   cod_comercial: "04154",
@@ -28,6 +36,7 @@ describe("TrainStatsModal", () => {
     render(
       <TrainStatsModal
         codComercial="04154"
+        schedule={SCHEDULE}
         metrics={METRICS}
         firstAggregatedDate="2026-07-31"
         thresholdMinutes={15}
@@ -41,10 +50,42 @@ describe("TrainStatsModal", () => {
     expect(screen.getByText(/desde 31 de julio de 2026/)).toBeInTheDocument();
   });
 
+  it("shows the scheduled departure and arrival times next to the title", () => {
+    render(
+      <TrainStatsModal
+        codComercial="04154"
+        schedule={SCHEDULE}
+        metrics={METRICS}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Salida 06:56")).toBeInTheDocument();
+    expect(screen.getByText("Llegada 08:56")).toBeInTheDocument();
+  });
+
+  it("omits the schedule line when the train's schedule is unknown", () => {
+    render(
+      <TrainStatsModal
+        codComercial="04154"
+        schedule={undefined}
+        metrics={METRICS}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/Salida/)).not.toBeInTheDocument();
+  });
+
   it("omits the 'desde' clause when firstAggregatedDate is unknown", () => {
     render(
       <TrainStatsModal
         codComercial="04154"
+        schedule={SCHEDULE}
         metrics={METRICS}
         firstAggregatedDate={undefined}
         thresholdMinutes={undefined}
@@ -59,6 +100,7 @@ describe("TrainStatsModal", () => {
     render(
       <TrainStatsModal
         codComercial="99999"
+        schedule={undefined}
         metrics={undefined}
         firstAggregatedDate="2026-07-31"
         thresholdMinutes={15}
@@ -75,6 +117,7 @@ describe("TrainStatsModal", () => {
     render(
       <TrainStatsModal
         codComercial="04154"
+        schedule={SCHEDULE}
         metrics={METRICS}
         firstAggregatedDate="2026-07-31"
         thresholdMinutes={15}
@@ -98,6 +141,7 @@ describe("TrainStatsModal", () => {
     render(
       <TrainStatsModal
         codComercial="04154"
+        schedule={SCHEDULE}
         metrics={METRICS}
         firstAggregatedDate="2026-07-31"
         thresholdMinutes={15}

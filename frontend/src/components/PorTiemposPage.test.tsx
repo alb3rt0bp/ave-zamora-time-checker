@@ -123,6 +123,32 @@ describe("PorTiemposPage", () => {
     expect(screen.getByText(/340 min/)).toBeInTheDocument();
   });
 
+  it("includes the current, incomplete month in the selector", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/metrics/weeks`, () => HttpResponse.json([weekFixture()])),
+      http.get(`${API_BASE_URL}/metrics/months`, () =>
+        HttpResponse.json([
+          monthFixture({ month: 1, is_complete: true, suma_retraso_significativo_minutos: 340 }),
+          monthFixture({ month: 2, is_complete: false, suma_retraso_significativo_minutos: 12 }),
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(<PorTiemposPage />);
+    await screen.findByLabelText(/selecciona una semana/i);
+
+    await user.click(screen.getByRole("button", { name: "Meses" }));
+
+    const select = await screen.findByLabelText(/selecciona un mes/i);
+    const options = within(select).getAllByRole("option");
+    expect(options).toHaveLength(2);
+    // El mes en curso, al ser el más reciente, se selecciona por defecto.
+    expect(select).toHaveValue("2026-2");
+    expect(screen.getByText(/en curso/i)).toBeInTheDocument();
+    expect(screen.getByText(/12 min/)).toBeInTheDocument();
+  });
+
   it("shows an empty state when there are no complete weeks yet", async () => {
     server.use(
       http.get(`${API_BASE_URL}/metrics/weeks`, () =>

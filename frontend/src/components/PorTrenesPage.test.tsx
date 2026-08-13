@@ -8,8 +8,8 @@ import { PorTrenesPage } from "./PorTrenesPage";
 const API_BASE_URL = "http://localhost:3000";
 
 const SCHEDULE = [
-  { cod_comercial: "04154", sentido: "Madrid", weekdays: [0] },
-  { cod_comercial: "04475", sentido: "Galicia", weekdays: [6] },
+  { cod_comercial: "04154", sentido: "Madrid", hora_salida: "06:56", hora_llegada_destino: "08:56", weekdays: [0] },
+  { cod_comercial: "04475", sentido: "Galicia", hora_salida: "20:19", hora_llegada_destino: "21:32", weekdays: [6] },
 ];
 
 const TRAIN_METRICS = [
@@ -62,22 +62,24 @@ function mockHappyPath() {
 }
 
 describe("PorTrenesPage", () => {
-  it("groups trains under the weekdays they operate on", async () => {
+  it("groups trains under Laborables (L-V) or Sábado/Domingo", async () => {
     mockHappyPath();
     render(<PorTrenesPage />);
 
-    expect(await screen.findByText("Lunes")).toBeInTheDocument();
+    expect(await screen.findByText("Laborables")).toBeInTheDocument();
     expect(screen.getByText("Domingo")).toBeInTheDocument();
     expect(screen.getByText("04154 · Madrid")).toBeInTheDocument();
     expect(screen.getByText("04475 · Galicia")).toBeInTheDocument();
-    // Solo se renderizan los días de la semana que tienen algún tren.
+    // Solo se renderizan los apartados que tienen algún tren.
     expect(screen.queryByText("Sábado")).not.toBeInTheDocument();
   });
 
-  it("repeats a train under every weekday it operates on", async () => {
+  it("shows a weekday train only once under Laborables, even if it runs several weekdays", async () => {
     server.use(
       http.get(`${API_BASE_URL}/trains/schedule`, () =>
-        HttpResponse.json([{ cod_comercial: "04154", sentido: "Madrid", weekdays: [0, 1, 2] }]),
+        HttpResponse.json([
+          { cod_comercial: "04154", sentido: "Madrid", hora_salida: "06:56", hora_llegada_destino: "08:56", weekdays: [0, 1, 2] },
+        ]),
       ),
       http.get(`${API_BASE_URL}/metrics/trains`, () => HttpResponse.json(TRAIN_METRICS)),
       http.get(`${API_BASE_URL}/metrics/global`, () => HttpResponse.json(GLOBAL_METRICS)),
@@ -85,10 +87,33 @@ describe("PorTrenesPage", () => {
 
     render(<PorTrenesPage />);
 
-    await screen.findByText("Lunes");
-    expect(screen.getByText("Martes")).toBeInTheDocument();
-    expect(screen.getByText("Miércoles")).toBeInTheDocument();
-    expect(screen.getAllByText("04154 · Madrid")).toHaveLength(3);
+    await screen.findByText("Laborables");
+    expect(screen.queryByText("Martes")).not.toBeInTheDocument();
+    expect(screen.getAllByText("04154 · Madrid")).toHaveLength(1);
+  });
+
+  it("orders trains within a group by scheduled departure time", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/trains/schedule`, () =>
+        HttpResponse.json([
+          { cod_comercial: "04160", sentido: "Madrid", hora_salida: "18:30", hora_llegada_destino: "20:30", weekdays: [0] },
+          { cod_comercial: "04154", sentido: "Madrid", hora_salida: "06:56", hora_llegada_destino: "08:56", weekdays: [0] },
+          { cod_comercial: "04157", sentido: "Madrid", hora_salida: "12:10", hora_llegada_destino: "14:10", weekdays: [0] },
+        ]),
+      ),
+      http.get(`${API_BASE_URL}/metrics/trains`, () => HttpResponse.json(TRAIN_METRICS)),
+      http.get(`${API_BASE_URL}/metrics/global`, () => HttpResponse.json(GLOBAL_METRICS)),
+    );
+
+    render(<PorTrenesPage />);
+
+    await screen.findByText("Laborables");
+    const chips = screen.getAllByRole("button", { name: /04/ });
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      "04154 · Madrid",
+      "04157 · Madrid",
+      "04160 · Madrid",
+    ]);
   });
 
   it("opens the stats modal with the train's metrics when a chip is clicked", async () => {
@@ -100,6 +125,8 @@ describe("PorTrenesPage", () => {
 
     expect(await screen.findByRole("dialog", { name: /04154/ })).toBeInTheDocument();
     expect(screen.getByText(/desde 31 de julio de 2026/)).toBeInTheDocument();
+    expect(screen.getByText("Salida 06:56")).toBeInTheDocument();
+    expect(screen.getByText("Llegada 08:56")).toBeInTheDocument();
   });
 
   it("shows an empty state for a train with no metrics yet", async () => {

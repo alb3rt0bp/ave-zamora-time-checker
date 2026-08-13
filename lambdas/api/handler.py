@@ -43,10 +43,25 @@ def _build_train_schedule_index(trains: list[dict]) -> list[dict]:
     by_cod: dict[str, dict] = {}
     for train in trains:
         cod = train["cod_comercial"]
-        entry = by_cod.setdefault(cod, {"cod_comercial": cod, "sentido": train["sentido"], "weekdays": set()})
+        entry = by_cod.setdefault(
+            cod,
+            {
+                "cod_comercial": cod,
+                "sentido": train["sentido"],
+                "hora_salida": train["hora_salida"],
+                "hora_llegada_destino": train["hora_llegada_destino"],
+                "weekdays": set(),
+            },
+        )
         entry["weekdays"].update(train["weekdays"])
     return [
-        {"cod_comercial": cod, "sentido": entry["sentido"], "weekdays": sorted(entry["weekdays"])}
+        {
+            "cod_comercial": cod,
+            "sentido": entry["sentido"],
+            "hora_salida": entry["hora_salida"],
+            "hora_llegada_destino": entry["hora_llegada_destino"],
+            "weekdays": sorted(entry["weekdays"]),
+        }
         for cod, entry in sorted(by_cod.items())
     ]
 

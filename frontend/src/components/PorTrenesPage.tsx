@@ -2,10 +2,8 @@ import { useState } from "react";
 import { fetchGlobalMetrics, fetchTrainMetrics, fetchTrainSchedule, NotFoundError } from "../api";
 import type { GlobalMetrics, TrainMetrics, TrainSchedule } from "../types";
 import { useFetch } from "../hooks/useFetch";
-import { formatWeekday } from "../utils/metricsFormat";
+import { WEEKDAY_GROUPS, groupByWeekdayGroup } from "../utils/weekdayGroups";
 import { TrainStatsModal } from "./TrainStatsModal";
-
-const WEEKDAY_ORDER = [0, 1, 2, 3, 4, 5, 6];
 
 interface PageData {
   schedule: TrainSchedule[];
@@ -26,18 +24,6 @@ async function loadPageData(): Promise<PageData> {
     }),
   ]);
   return { schedule, trains, global };
-}
-
-function groupByWeekday(schedule: TrainSchedule[]): Map<number, TrainSchedule[]> {
-  const groups = new Map<number, TrainSchedule[]>();
-  for (const train of schedule) {
-    for (const day of train.weekdays) {
-      const dayTrains = groups.get(day) ?? [];
-      dayTrains.push(train);
-      groups.set(day, dayTrains);
-    }
-  }
-  return groups;
 }
 
 export function PorTrenesPage() {
@@ -73,6 +59,7 @@ export function PorTrenesPage() {
       {openTrainCode && state.status === "ok" && (
         <TrainStatsModal
           codComercial={openTrainCode}
+          schedule={state.data.schedule.find((train) => train.cod_comercial === openTrainCode)}
           metrics={state.data.trains.find((train) => train.cod_comercial === openTrainCode)}
           firstAggregatedDate={state.data.global?.first_aggregated_date}
           thresholdMinutes={state.data.global?.significant_delay_threshold_minutes}
@@ -95,15 +82,15 @@ function PorTrenesList({ schedule, onSelectTrain }: PorTrenesListProps) {
     return <p className="state-card">No hay trenes en el horario.</p>;
   }
 
-  const groups = groupByWeekday(schedule);
+  const groups = groupByWeekdayGroup(schedule);
 
   return (
     <div className="weekday-groups">
-      {WEEKDAY_ORDER.filter((day) => (groups.get(day) ?? []).length > 0).map((day) => (
-        <section key={day} className="weekday-group">
-          <h2 className="weekday-group__title">{formatWeekday(day)}</h2>
+      {WEEKDAY_GROUPS.filter((group) => (groups.get(group.key) ?? []).length > 0).map((group) => (
+        <section key={group.key} className="weekday-group">
+          <h2 className="weekday-group__title">{group.label}</h2>
           <div className="weekday-group__trains">
-            {(groups.get(day) ?? []).map((train) => (
+            {(groups.get(group.key) ?? []).map((train) => (
               <button
                 key={train.cod_comercial}
                 type="button"

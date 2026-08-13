@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TrainTable } from "./TrainTable";
-import type { RenfeTren, TrainRow } from "../types";
+import type { RenfeTren, TrainRow, TrainSchedule } from "../types";
 
 vi.mock("./TrainMapModal", () => ({
   TrainMapModal: ({ codComercial, onClose }: { codComercial: string; onClose: () => void }) => (
@@ -34,15 +34,36 @@ const rows: TrainRow[] = [
   },
 ];
 
+const schedule: Map<string, TrainSchedule> = new Map([
+  [
+    "04154",
+    {
+      cod_comercial: "04154",
+      sentido: "Madrid",
+      hora_salida: "06:35",
+      hora_llegada_destino: "08:35",
+      weekdays: [0, 1, 2, 3, 4],
+    },
+  ],
+]);
+
 describe("TrainTable", () => {
   it("renders one row per train with its key fields", () => {
-    render(<TrainTable rows={rows} />);
+    render(<TrainTable rows={rows} schedule={schedule} />);
 
     expect(screen.getByText("04154")).toBeInTheDocument();
     expect(screen.getByText("Madrid")).toBeInTheDocument();
+    expect(screen.getByText("06:35")).toBeInTheDocument();
     expect(screen.getByText("07:41")).toBeInTheDocument();
     expect(screen.getByText("07:03")).toBeInTheDocument();
     expect(screen.getByText("+6 min")).toBeInTheDocument();
+  });
+
+  it("shows a dash for hora de salida when the train isn't in the schedule index", () => {
+    render(<TrainTable rows={rows} />);
+
+    const row04154 = screen.getByText("04154").closest("tr")!;
+    expect(within(row04154).getAllByText("-").length).toBeGreaterThan(0);
   });
 
   it("shows a dash for hora de paso por Zamora when it hasn't been captured yet", () => {
@@ -91,16 +112,13 @@ describe("TrainTable", () => {
     expect(codes).toEqual(["A", "C", "B"]);
   });
 
-  it("labels the arrival column as 'Hora de llegada corregida'", () => {
+  it("labels the columns as requested: sentido, salida, llegada, llegada corregida and paso por Zamora", () => {
     render(<TrainTable rows={rows} />);
 
-    expect(screen.getByText("Hora de llegada corregida")).toBeInTheDocument();
-    expect(screen.queryByText("Hora llegada")).not.toBeInTheDocument();
-  });
-
-  it("labels the Zamora passage column as 'Hora de paso por Zamora'", () => {
-    render(<TrainTable rows={rows} />);
-
+    expect(screen.getByRole("columnheader", { name: "Sentido" })).toBeInTheDocument();
+    expect(screen.getByText("Hora de salida")).toBeInTheDocument();
+    expect(screen.getByText("Hora de llegada")).toBeInTheDocument();
+    expect(screen.getByText("Llegada corregida")).toBeInTheDocument();
     expect(screen.getByText("Hora de paso por Zamora")).toBeInTheDocument();
   });
 

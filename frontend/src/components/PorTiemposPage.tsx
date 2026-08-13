@@ -30,7 +30,8 @@ function monthKey(month: MonthMetrics): string {
 }
 
 function monthLabel(month: MonthMetrics): string {
-  return `${formatMonthName(month.month)} de ${month.year}`;
+  const label = `${formatMonthName(month.month)} de ${month.year}`;
+  return month.is_complete ? label : `${label} (en curso)`;
 }
 
 export function PorTiemposPage() {
@@ -83,11 +84,11 @@ export function PorTiemposPage() {
         )}
         {state.status === "ok" && mode === "meses" && (
           <PeriodSection
-            periods={state.data.months.filter((month) => month.is_complete)}
+            periods={state.data.months}
             getKey={monthKey}
             getLabel={monthLabel}
-            selectLabel="Selecciona un mes completo"
-            emptyMessage="Todavía no hay ningún mes completo."
+            selectLabel="Selecciona un mes"
+            emptyMessage="Todavía no hay datos de ningún mes."
           />
         )}
       </main>
