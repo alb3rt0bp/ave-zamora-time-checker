@@ -123,8 +123,10 @@ export interface GlobalMetrics extends DelayBuckets {
   first_aggregated_date: string;
   significant_delay_threshold_minutes: number;
   dia_semana_mas_probable: WeekdayRiskSummary | null;
+  dia_semana_menos_probable: WeekdayRiskSummary | null;
   franja_horaria_mas_probable: FranjaHorariaRiskSummary | null;
   tren_mas_probable: TrainMetrics | null;
+  tren_menos_probable: TrainMetrics | null;
 }
 
 export interface TrainSchedule {

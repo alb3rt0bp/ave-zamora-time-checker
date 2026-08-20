@@ -49,6 +49,18 @@ class TestGetGlobalMetricsHandler(ApiHandlerTestCase):
             "suma_retraso_significativo_minutos": 120,
             "last_aggregated_date": "2026-08-10",
         })
+        # Segundo tren, con menos retraso, para distinguir tren_menos_probable
+        # de tren_mas_probable (con uno solo, ambos apuntarían al mismo).
+        self.put_metrics_item({
+            "pk": "TRAIN#04505",
+            "cod_comercial": "04505",
+            "sentido": "Galicia",
+            "total_viajes": 10,
+            "viajes_bucket_puntual": 9, "viajes_bucket_leve": 1,
+            "viajes_bucket_significativo": 0, "viajes_bucket_grave": 0,
+            "suma_retraso_significativo_minutos": 0,
+            "last_aggregated_date": "2026-08-10",
+        })
 
         response = self.handler.get_global_metrics_handler({}, FakeContext())
         self.assertEqual(response["statusCode"], 200)
@@ -61,9 +73,11 @@ class TestGetGlobalMetricsHandler(ApiHandlerTestCase):
         self.assertEqual(body["significant_delay_threshold_minutes"], 15)
 
         self.assertEqual(body["dia_semana_mas_probable"]["dia_semana"], 1)   # martes: 100%
+        self.assertEqual(body["dia_semana_menos_probable"]["dia_semana"], 0)  # lunes: 30%
         self.assertEqual(body["franja_horaria_mas_probable"]["franja"], "noche")  # 75%
         self.assertEqual(body["tren_mas_probable"]["cod_comercial"], "04154")
         self.assertEqual(body["tren_mas_probable"]["rank_retraso"], 1)
+        self.assertEqual(body["tren_menos_probable"]["cod_comercial"], "04505")
 
         # Regresión Decimal→string (ver test_get_train_metrics_handler.py).
         self.assertIsInstance(body["total_viajes"], int)

@@ -22,7 +22,8 @@ export function weekKey(week: WeekMetrics): string {
 }
 
 export function weekLabel(week: WeekMetrics): string {
-  return `${formatShortDate(week.week_start)} - ${formatShortDate(week.week_end)} de ${week.iso_year}`;
+  const label = `${formatShortDate(week.week_start)} - ${formatShortDate(week.week_end)} de ${week.iso_year}`;
+  return week.is_complete ? label : `${label} (en curso)`;
 }
 
 function monthKey(month: MonthMetrics): string {
@@ -41,7 +42,7 @@ export function PorTiemposPage() {
   return (
     <>
       <header className="app-header glass">
-        <h1 className="app-title">Estadísticas · Por tiempos</h1>
+        <h1 className="app-title">Estadísticas · Por intervalos</h1>
         <div className="segmented-control glass">
           <button
             type="button"
@@ -75,11 +76,11 @@ export function PorTiemposPage() {
         )}
         {state.status === "ok" && mode === "semanas" && (
           <PeriodSection
-            periods={state.data.weeks.filter((week) => week.is_complete)}
+            periods={state.data.weeks}
             getKey={weekKey}
             getLabel={weekLabel}
-            selectLabel="Selecciona una semana completa"
-            emptyMessage="Todavía no hay ninguna semana completa (lunes a domingo)."
+            selectLabel="Selecciona una semana"
+            emptyMessage="Todavía no hay datos de ninguna semana."
           />
         )}
         {state.status === "ok" && mode === "meses" && (

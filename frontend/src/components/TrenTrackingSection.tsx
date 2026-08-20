@@ -35,7 +35,7 @@ export function TrenTrackingSection() {
   return (
     <>
       <header className="app-header glass">
-        <h1 className="app-title">Puntualidad de trenes en Zamora</h1>
+        <h1 className="app-title">Seguimiento de trenes de Zamora</h1>
         <Clock />
         <div className="date-toolbar">
           <div className="date-toolbar__nav glass">

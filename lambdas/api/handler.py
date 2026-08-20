@@ -392,8 +392,10 @@ def get_global_metrics_handler(event, context):
         "first_aggregated_date": item["first_aggregated_date"],
         "significant_delay_threshold_minutes": SIGNIFICANT_DELAY_THRESHOLD_MINUTES,
         "dia_semana_mas_probable": dia_ranking[0] if dia_ranking else None,
+        "dia_semana_menos_probable": dia_ranking[-1] if dia_ranking else None,
         "franja_horaria_mas_probable": franja_ranking[0] if franja_ranking else None,
         "tren_mas_probable": tren_ranking[0] if tren_ranking else None,
+        "tren_menos_probable": tren_ranking[-1] if tren_ranking else None,
     }
 
     logger.info("get_global_metrics_handler: métricas globales servidas", extra=log_extra)

@@ -102,7 +102,7 @@ export function Sidebar({ activeSection, onSelectSection }: SidebarProps) {
                 aria-current={activeSection === "estadisticas-tiempos" ? "page" : undefined}
                 onClick={() => selectSection("estadisticas-tiempos")}
               >
-                Por tiempos
+                Por intervalos
               </button>
               <button
                 type="button"

@@ -245,8 +245,8 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Por trenes" }));
     expect(await screen.findByRole("heading", { name: "Estadísticas · Por trenes" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Por tiempos" }));
-    expect(await screen.findByRole("heading", { name: "Estadísticas · Por tiempos" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Por intervalos" }));
+    expect(await screen.findByRole("heading", { name: "Estadísticas · Por intervalos" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Global" }));
     expect(await screen.findByRole("heading", { name: "Estadísticas · Global" })).toBeInTheDocument();

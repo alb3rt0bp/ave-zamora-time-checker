@@ -62,13 +62,19 @@ function monthFixture(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("PorTiemposPage", () => {
-  it("shows only complete weeks and defaults to the most recent", async () => {
+  it("includes the current, incomplete week in the selector", async () => {
     server.use(
       http.get(`${API_BASE_URL}/metrics/weeks`, () =>
         HttpResponse.json([
           weekFixture({ iso_week: 1, week_start: "2025-12-29", week_end: "2026-01-04", is_complete: true }),
           weekFixture({ iso_week: 2, is_complete: true, suma_retraso_significativo_minutos: 95 }),
-          weekFixture({ iso_week: 3, week_start: "2026-01-12", week_end: "2026-01-18", is_complete: false }),
+          weekFixture({
+            iso_week: 3,
+            week_start: "2026-01-12",
+            week_end: "2026-01-18",
+            is_complete: false,
+            suma_retraso_significativo_minutos: 12,
+          }),
         ]),
       ),
       http.get(`${API_BASE_URL}/metrics/months`, () => HttpResponse.json([])),
@@ -78,10 +84,11 @@ describe("PorTiemposPage", () => {
 
     const select = await screen.findByLabelText(/selecciona una semana/i);
     const options = within(select).getAllByRole("option");
-    // La semana 3 (incompleta) no debe aparecer como opción.
-    expect(options).toHaveLength(2);
-    expect(select).toHaveValue("2026-W2");
-    expect(screen.getByText(/95 min/)).toBeInTheDocument();
+    expect(options).toHaveLength(3);
+    // La semana en curso, al ser la más reciente, se selecciona por defecto.
+    expect(select).toHaveValue("2026-W3");
+    expect(screen.getByText(/en curso/i)).toBeInTheDocument();
+    expect(screen.getByText(/12 min/)).toBeInTheDocument();
   });
 
   it("updates the summary when a different week is selected", async () => {
@@ -166,17 +173,15 @@ describe("PorTiemposPage", () => {
     expect(screen.getByText(/12 min/)).toBeInTheDocument();
   });
 
-  it("shows an empty state when there are no complete weeks yet", async () => {
+  it("shows an empty state when there are no weeks yet", async () => {
     server.use(
-      http.get(`${API_BASE_URL}/metrics/weeks`, () =>
-        HttpResponse.json([weekFixture({ is_complete: false })]),
-      ),
+      http.get(`${API_BASE_URL}/metrics/weeks`, () => HttpResponse.json([])),
       http.get(`${API_BASE_URL}/metrics/months`, () => HttpResponse.json([])),
     );
 
     render(<PorTiemposPage />);
 
-    expect(await screen.findByText(/todavía no hay ninguna semana completa/i)).toBeInTheDocument();
+    expect(await screen.findByText(/todavía no hay datos de ninguna semana/i)).toBeInTheDocument();
   });
 
   it("shows an error state when a request fails", async () => {

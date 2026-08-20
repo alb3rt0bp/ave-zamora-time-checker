@@ -32,7 +32,7 @@ describe("Sidebar", () => {
     await user.click(screen.getByRole("button", { name: "Estadísticas" }));
 
     expect(screen.getByRole("button", { name: "Por trenes" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Por tiempos" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Por intervalos" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Global" })).toBeInTheDocument();
   });
 
@@ -42,7 +42,7 @@ describe("Sidebar", () => {
     render(<Sidebar activeSection="seguimiento" onSelectSection={onSelectSection} />);
 
     await user.click(screen.getByRole("button", { name: "Estadísticas" }));
-    await user.click(screen.getByRole("button", { name: "Por tiempos" }));
+    await user.click(screen.getByRole("button", { name: "Por intervalos" }));
 
     expect(onSelectSection).toHaveBeenCalledWith("estadisticas-tiempos");
   });

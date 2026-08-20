@@ -1,11 +1,24 @@
-import { fetchGlobalMetrics } from "../api";
-import type { GlobalMetrics } from "../types";
+import { useState } from "react";
+import { fetchGlobalMetrics, fetchTrainSchedule } from "../api";
+import type { GlobalMetrics, TrainSchedule } from "../types";
 import { useFetch } from "../hooks/useFetch";
 import { formatFranjaHoraria, formatSpanishDate, formatWeekday } from "../utils/metricsFormat";
 import { DonutChart } from "./DonutChart";
+import { TrainStatsModal } from "./TrainStatsModal";
+
+interface PageData {
+  global: GlobalMetrics;
+  schedule: TrainSchedule[];
+}
+
+async function loadPageData(): Promise<PageData> {
+  const [global, schedule] = await Promise.all([fetchGlobalMetrics(), fetchTrainSchedule()]);
+  return { global, schedule };
+}
 
 export function GlobalStatsPage() {
-  const state = useFetch(fetchGlobalMetrics, []);
+  const state = useFetch(loadPageData, []);
+  const [openTrainCode, setOpenTrainCode] = useState<string | null>(null);
 
   return (
     <>
@@ -27,13 +40,33 @@ export function GlobalStatsPage() {
             No se han podido cargar las estadísticas globales.
           </p>
         )}
-        {state.status === "ok" && <GlobalStatsContent global={state.data} />}
+        {state.status === "ok" && <GlobalStatsContent global={state.data.global} onSelectTrain={setOpenTrainCode} />}
       </main>
+      {openTrainCode && state.status === "ok" && (
+        <TrainStatsModal
+          codComercial={openTrainCode}
+          schedule={state.data.schedule.find((train) => train.cod_comercial === openTrainCode)}
+          metrics={
+            [state.data.global.tren_mas_probable, state.data.global.tren_menos_probable].find(
+              (train) => train?.cod_comercial === openTrainCode,
+            ) ?? undefined
+          }
+          firstAggregatedDate={state.data.global.first_aggregated_date}
+          thresholdMinutes={state.data.global.significant_delay_threshold_minutes}
+          onClose={() => setOpenTrainCode(null)}
+        />
+      )}
     </>
   );
 }
 
-function GlobalStatsContent({ global }: { global: GlobalMetrics }) {
+function GlobalStatsContent({
+  global,
+  onSelectTrain,
+}: {
+  global: GlobalMetrics;
+  onSelectTrain: (codComercial: string) => void;
+}) {
   return (
     <div className="train-stats">
       <DonutChart buckets={global} thresholdMinutes={global.significant_delay_threshold_minutes} />
@@ -48,6 +81,12 @@ function GlobalStatsContent({ global }: { global: GlobalMetrics }) {
             <dd>{formatWeekday(global.dia_semana_mas_probable.dia_semana)}</dd>
           </div>
         )}
+        {global.dia_semana_menos_probable && (
+          <div className="stats-row">
+            <dt>Día con menos riesgo de retraso significativo</dt>
+            <dd>{formatWeekday(global.dia_semana_menos_probable.dia_semana)}</dd>
+          </div>
+        )}
         {global.franja_horaria_mas_probable && (
           <div className="stats-row">
             <dt>Franja horaria con más riesgo de retraso significativo</dt>
@@ -57,7 +96,29 @@ function GlobalStatsContent({ global }: { global: GlobalMetrics }) {
         {global.tren_mas_probable && (
           <div className="stats-row">
             <dt>Tren con más riesgo de retraso significativo</dt>
-            <dd>{global.tren_mas_probable.cod_comercial}</dd>
+            <dd>
+              <button
+                type="button"
+                className="stats-row__link"
+                onClick={() => onSelectTrain(global.tren_mas_probable!.cod_comercial)}
+              >
+                {global.tren_mas_probable.cod_comercial}
+              </button>
+            </dd>
+          </div>
+        )}
+        {global.tren_menos_probable && (
+          <div className="stats-row">
+            <dt>Tren con menos riesgo de retraso significativo</dt>
+            <dd>
+              <button
+                type="button"
+                className="stats-row__link"
+                onClick={() => onSelectTrain(global.tren_menos_probable!.cod_comercial)}
+              >
+                {global.tren_menos_probable.cod_comercial}
+              </button>
+            </dd>
           </div>
         )}
       </dl>
