@@ -142,6 +142,7 @@ Globals:
         DYNAMODB_STATE_TABLE: !Ref TrainStateTable
         DYNAMODB_METRICS_TABLE: !Ref TrainMetricsTable
         SIGNIFICANT_DELAY_THRESHOLD_MINUTES: !Ref SignificantDelayThresholdMinutes
+        TRENDS_S3_KEY:        "trends/latest_hashtags.json"
         LOG_LEVEL:            INFO
 
 
@@ -332,7 +333,7 @@ Resources:
 
   # Placeholder: la API key real de xfetch.io (proveedor externo de datos
   # públicos de X, no la API oficial de X ni de Anthropic — ver
-  # lambdas/tweet_notifier/xfetch_client.py) se rellena a mano tras el
+  # lambdas/trend_fetcher/xfetch_client.py) se rellena a mano tras el
   # despliegue, igual que XApiCredentialsSecret.
   XfetchApiKeySecret:
     Type: AWS::SecretsManager::Secret
@@ -350,22 +351,23 @@ Resources:
       Description: >
         Disparada por DelayTweetTopic cuando un tren se marca entregado con
         más de DelayAlertThresholdMinutes minutos de retraso (o es el tren
-        madrugador). Redacta el tuit con Claude (Bedrock) más tendencias de
-        xfetch.io; por ahora solo lo loguea.
+        madrugador). Redacta el tuit con Claude (Bedrock) más las tendencias
+        de X guardadas en S3 por TrendFetcherFunction; por ahora solo lo
+        loguea.
       Environment:
         Variables:
           X_API_CREDENTIALS_SECRET_ARN: !Ref XApiCredentialsSecret
           CLAUDE_MODEL_ID: !Ref ClaudeModelId
           DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
-          XFETCH_API_KEY_SECRET_ARN: !Ref XfetchApiKeySecret
-          XFETCH_TRENDS_ENABLED: "true"
+          TRENDS_ENABLED: "true"
       Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref DatalakeBucket
         - Statement:
             - Effect: Allow
               Action: secretsmanager:GetSecretValue
               Resource:
                 - !Ref XApiCredentialsSecret
-                - !Ref XfetchApiKeySecret
             # Modelo de cross-region inference: hace falta permiso tanto
             # sobre el inference profile como sobre el foundation model al
             # que enruta (ver infrastructure notes / AWS docs de Bedrock).
@@ -389,6 +391,48 @@ Resources:
           Type: SNS
           Properties:
             Topic: !Ref DelayTweetTopic
+      Tags:
+        Project: ZamoraTrainObservability
+        Environment: !Ref Environment
+
+  # ── Lambda: consulta de tendencias de X (xfetch.io), 2 veces al día ────────
+  # Desacoplada de TweetNotifierFunction para no golpear xfetch.io una vez
+  # por cada tuit redactado: consulta 2 veces al día y guarda el resultado en
+  # S3 (trends/latest_hashtags.json), que TweetNotifierFunction lee vía
+  # trends_reader.py. Reduce el consumo de créditos de xfetch.io sin perder
+  # frescura relevante para el contenido de los tuits.
+  TrendFetcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "zamora-trend-fetcher-${Environment}"
+      CodeUri: ../lambdas/trend_fetcher/
+      Handler: handler.lambda_handler
+      Description: >
+        Ejecutada 2 veces al día (08:00 y 19:00, hora de Madrid). Consulta
+        las tendencias actuales de X en España vía xfetch.io y las guarda en
+        S3 para que TweetNotifierFunction las lea sin volver a consultar
+        xfetch.io en cada tuit.
+      Environment:
+        Variables:
+          XFETCH_API_KEY_SECRET_ARN: !Ref XfetchApiKeySecret
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref DatalakeBucket
+        - Statement:
+            - Effect: Allow
+              Action: secretsmanager:GetSecretValue
+              Resource:
+                - !Ref XfetchApiKeySecret
+      Events:
+        TrendFetchSchedule:
+          Type: ScheduleV2
+          Properties:
+            Name: !Sub "zamora-trend-fetcher-${Environment}"
+            ScheduleExpression: "cron(0 8,19 * * ? *)"
+            ScheduleExpressionTimezone: "Europe/Madrid"
+            FlexibleTimeWindow:
+              Mode: "OFF"
+            Description: "Consulta de tendencias de X, 08:00 y 19:00 hora de Madrid"
       Tags:
         Project: ZamoraTrainObservability
         Environment: !Ref Environment

@@ -4,7 +4,7 @@ from unittest.mock import patch
 import boto3
 from moto import mock_aws
 
-from tests.dummies import tweet_notifier_env
+from tests.dummies import trend_fetcher_env
 from tests.dummies.fake_http import FakeHTTPResponse, fake_urlopen_json, raise_url_error
 from tests.dummies.log_extra import SAMPLE_LOG_EXTRA
 from tests.dummies.xfetch_samples import TRENDS_SPAIN_REAL_SAMPLE
@@ -17,9 +17,9 @@ class TestGetTrendingHashtags(unittest.TestCase):
         self.mock_aws.start()
         self.addCleanup(self.mock_aws.stop)
 
-        secretsmanager = boto3.client("secretsmanager", region_name=tweet_notifier_env.AWS_REGION)
+        secretsmanager = boto3.client("secretsmanager", region_name=trend_fetcher_env.AWS_REGION)
         secretsmanager.create_secret(
-            Name=tweet_notifier_env.XFETCH_API_KEY_SECRET_ARN,
+            Name=trend_fetcher_env.XFETCH_API_KEY_SECRET_ARN,
             SecretString="test-xfetch-key",
         )
         xfetch_client._api_key_cache = None  # aislar la caché entre tests

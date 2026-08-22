@@ -5,10 +5,12 @@ con retraso, usando Claude Sonnet 4.6 vía Amazon Bedrock (InvokeModel, sin
 el SDK de Anthropic — solo boto3, igual que el resto de este proyecto).
 
 Bedrock no soporta ninguna server-side tool (búsqueda web incluida), así
-que las tendencias reales de X se consiguen aparte, vía xfetch_client.py,
-como enriquecimiento aditivo y no bloqueante — igual de espíritu que el
-enriquecimiento GTFS-RT de train_tracker: si xfetch falla, se sigue
-redactando el tuit sin hashtag de tendencia.
+que las tendencias reales de X se consiguen aparte, vía trends_reader.py
+(que lee lo último guardado en S3 por la lambda trend_fetcher, en vez de
+golpear xfetch.io en cada tuit), como enriquecimiento aditivo y no
+bloqueante — igual de espíritu que el enriquecimiento GTFS-RT de
+train_tracker: si no hay tendencias disponibles, se sigue redactando el
+tuit sin hashtag de tendencia.
 """
 
 import json
@@ -17,14 +19,14 @@ import os
 
 import boto3
 
-import xfetch_client
+import trends_reader
 
 logger = logging.getLogger(f"tweet_notifier.{__name__}")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "global.anthropic.claude-sonnet-4-6")
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
-XFETCH_TRENDS_ENABLED = os.environ.get("XFETCH_TRENDS_ENABLED", "true").lower() == "true"
+TRENDS_ENABLED = os.environ.get("TRENDS_ENABLED", "true").lower() == "true"
 ANTHROPIC_VERSION = "bedrock-2023-05-31"
 
 bedrock_runtime = boto3.client("bedrock-runtime")
@@ -142,7 +144,7 @@ def draft_tweet(alert: dict, log_extra: dict) -> dict:
     Lanza excepción si Claude no ha podido redactar (refusal u otro
     stop_reason distinto de "end_turn", o una respuesta sin bloque de texto).
     """
-    trending_hashtags = xfetch_client.get_trending_hashtags(log_extra) if XFETCH_TRENDS_ENABLED else []
+    trending_hashtags = trends_reader.get_trending_hashtags(log_extra) if TRENDS_ENABLED else []
     logger.debug(f'Trending hahses: {trending_hashtags}', extra=log_extra)
     prompt = _build_user_message(alert, trending_hashtags)
     logger.debug(f'Prompt: {prompt}')

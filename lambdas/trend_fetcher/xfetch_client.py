@@ -2,14 +2,15 @@
 xfetch_client.py
 Cliente mínimo para el endpoint de tendencias de xfetch.io (proveedor
 externo de datos públicos de X/Twitter — no es la API oficial de X ni de
-Anthropic: https://xfetch.io/docs) usado por claude_client.py como
-enriquecimiento aditivo y no bloqueante para elegir un hashtag de tendencia,
-igual de espíritu que el enriquecimiento GTFS-RT de train_tracker: si falla,
-se sigue redactando el tuit sin ese hashtag extra. Implementado solo con
+Anthropic: https://xfetch.io/docs) usado por handler.py (lambda
+trend_fetcher) para consultar las tendencias actuales 2 veces al día y
+guardarlas en S3 — ver lambdas/tweet_notifier/trends_reader.py, que las lee
+de ahí en vez de golpear xfetch.io en cada tuit. Implementado solo con
 librería estándar (urllib), igual que renfe_client.py/x_client.py.
 
-Las credenciales OAuth1.0a de X (x_client.py) son un tema aparte: xfetch.io
-requiere su propia API key, gestionada en su propio dashboard.
+Las credenciales OAuth1.0a de X (tweet_notifier/x_client.py) son un tema
+aparte: xfetch.io requiere su propia API key, gestionada en su propio
+dashboard.
 """
 
 import json

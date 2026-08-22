@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from tests.dummies import tweet_notifier_env  # noqa: F401 - sys.path setup
 import claude_client
-import xfetch_client
+import trends_reader
 from tests.dummies.fake_claude import fake_refusal_response, fake_tweet_response
 from tests.dummies.log_extra import SAMPLE_LOG_EXTRA
 
@@ -21,10 +21,10 @@ ALERT = {
 
 class TestDraftTweet(unittest.TestCase):
     def setUp(self):
-        # Las tendencias son un enriquecimiento aparte (xfetch_client, no
+        # Las tendencias son un enriquecimiento aparte (trends_reader, no
         # Bedrock) — se mockean a "sin tendencias" salvo que el test diga
-        # lo contrario, para no depender de xfetch.io/Secrets Manager aquí.
-        patcher = patch.object(xfetch_client, "get_trending_hashtags", return_value=[])
+        # lo contrario, para no depender de S3 aquí.
+        patcher = patch.object(trends_reader, "get_trending_hashtags", return_value=[])
         self.mock_trends = patcher.start()
         self.addCleanup(patcher.stop)
 

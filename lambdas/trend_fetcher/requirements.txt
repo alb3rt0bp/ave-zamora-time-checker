@@ -1,0 +1,2 @@
+# Lambda runtime ya incluye boto3. xfetch_client.py usa solo librería
+# estándar (urllib) para la petición HTTP.
