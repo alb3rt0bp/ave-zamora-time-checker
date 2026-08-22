@@ -351,9 +351,8 @@ Resources:
       Description: >
         Disparada por DelayTweetTopic cuando un tren se marca entregado con
         más de DelayAlertThresholdMinutes minutos de retraso (o es el tren
-        madrugador). Redacta el tuit con Claude (Bedrock) más las tendencias
-        de X guardadas en S3 por TrendFetcherFunction; por ahora solo lo
-        loguea.
+        madrugador). Redacta el tuit con Claude (Bedrock) más tendencias de
+        X leídas de S3; por ahora solo lo loguea.
       Environment:
         Variables:
           X_API_CREDENTIALS_SECRET_ARN: !Ref XApiCredentialsSecret
