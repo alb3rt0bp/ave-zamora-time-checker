@@ -1,11 +1,10 @@
 # Zamora Train Observability — AWS Architecture
 
 Sistema de observabilidad en AWS para monitorizar la **puntualidad de los trenes
-Alvia/Intercity de Renfe a su paso por la estación de Zamora**. Construido para la
-**Asociación de Usuarios de Trenes AVE de Zamora**.
+Alvia/Intercity de Renfe a su paso por la estación de Zamora**.
 
 Los datos de retrasos alimentan un Data Lake que sirve como evidencia objetiva
-para la campaña de comunicación de la asociación (argumento central: Zamora no
+para la campaña de comunicación reivindicativa (argumento central: Zamora no
 tiene ningún tren de primera hora que llegue a Madrid Chamartín antes de las 08:00
 en día laborable, mientras que Salamanca, Segovia y Valladolid sí).
 
@@ -147,7 +146,7 @@ retrasos altos) para poder revisarla manualmente.
 Cuando `train-tracker` marca un tren como entregado con más de
 `DelayAlertThresholdMinutes` minutos de retraso — o es el "tren madrugador"
 (`FlagshipMadridTrainCode`, por defecto `04154`, el primer tren laborable
-hacia Madrid y eje de la reivindicación de la asociación), que siempre
+hacia Madrid y eje de la reivindicación), que siempre
 dispara alerta tenga o no retraso — publica un evento en el topic SNS
 `DelayTweetTopic`. Esto desacopla la publicación del ciclo de polling: un
 fallo o lentitud de Bedrock/X/xfetch nunca bloquea ni ralentiza
