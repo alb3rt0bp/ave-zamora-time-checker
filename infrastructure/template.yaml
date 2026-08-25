@@ -116,12 +116,42 @@ Parameters:
     Default: zamora_trains_db
     Description: Nombre de la base de datos en AWS Glue Data Catalog
 
+  DomainName:
+    Type: String
+    Default: ""
+    Description: >
+      Dominio propio del frontend (p.ej. zamorave.com). El registro del
+      dominio en sí NO es automatizable con SAM/CloudFormation — ver
+      infrastructure/DOMAIN_SETUP.md. Dejar vacío para desplegar sin
+      dominio propio (el frontend queda accesible solo por el dominio
+      *.cloudfront.net de FrontendDistribution).
+
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: >
+      Id de la Hosted Zone pública de Route53 para DomainName. Route53 la
+      crea automáticamente al registrar el dominio; obtenerla con
+      `aws route53 list-hosted-zones-by-name --dns-name <dominio>` — ver
+      infrastructure/DOMAIN_SETUP.md. Requerido si DomainName no está vacío.
+
+  FrontendCertificateArn:
+    Type: String
+    Default: ""
+    Description: >
+      ARN del certificado ACM para DomainName. Debe existir en us-east-1
+      (requisito de CloudFront, sea cual sea AwsRegion) — desplegado por
+      separado con infrastructure/certificate-us-east-1.yaml, ya que
+      CloudFormation no admite recursos de dos regiones en un mismo stack.
+      Requerido si DomainName no está vacío.
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONDICIONES
 # ══════════════════════════════════════════════════════════════════════════════
 Conditions:
   HasAlertEmail: !Not [!Equals [!Ref AlertEmailAddress, ""]]
+  HasCustomDomain: !Not [!Equals [!Ref DomainName, ""]]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -667,23 +697,25 @@ Resources:
         Project: ZamoraTrainObservability
         Environment: !Ref Environment
 
-  # ── Frontend: hosting estático ──────────────────────────────────────────────
-  # Sin CloudFront por ahora (decisión explícita para simplicidad en esta
-  # alpha): se sirve directamente vía el endpoint de website hosting de S3.
-  # Contenido público, no sensible (retrasos de trenes). A diferencia de
-  # DatalakeBucket, este bucket se deja deliberadamente público.
+  # ── Frontend: hosting estático + CDN ──────────────────────────────────────────
+  # CloudFront (con Origin Access Control) delante de un bucket S3 privado.
+  # Sustituye el S3 website hosting público que había antes: hacía falta un
+  # CDN de todos modos para servir DomainName con HTTPS (S3 website hosting
+  # no admite certificados propios) y de paso resuelve el fallback de rutas
+  # de la SPA (ver SpaFallbackFunction) y expone el API bajo /api en el
+  # mismo dominio, sin /prod en el path (ver ApiPathRewriteFunction).
+  # Contenido sin datos sensibles (retrasos de trenes), pero ya no hace
+  # falta exponer el bucket S3 directamente: solo CloudFront puede leerlo
+  # (OAC).
   FrontendBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub "zamora-trains-frontend-${Environment}-${AWS::AccountId}"
-      WebsiteConfiguration:
-        IndexDocument: index.html
-        ErrorDocument: index.html   # SPA fallback: cualquier ruta desconocida sirve index.html
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: false
-        BlockPublicPolicy: false
-        IgnorePublicAcls: false
-        RestrictPublicBuckets: false
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
 
   FrontendBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -692,11 +724,186 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: PublicReadGetObject
+          - Sid: AllowCloudFrontOriginAccess
             Effect: Allow
-            Principal: "*"
+            Principal:
+              Service: cloudfront.amazonaws.com
             Action: s3:GetObject
             Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}"
+
+  FrontendOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "zamora-trains-frontend-${Environment}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Reescribe /api/algo -> /algo antes de reenviar a API Gateway. El origen
+  # ya añade el stage (OriginPath: /{Environment}) delante de lo que llega,
+  # así que sin esto la petición acabaría en /{Environment}/api/algo en vez
+  # de /{Environment}/algo. Resultado: el path público es /api/... sin
+  # /prod, aunque el HttpApi siga usando un stage internamente.
+  ApiPathRewriteFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "zamora-trains-api-path-rewrite-${Environment}"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: "Quita el prefijo /api antes de reenviar a API Gateway"
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+            var request = event.request;
+            request.uri = request.uri.replace(/^\/api/, '') || '/';
+            return request;
+        }
+
+  # Fallback de rutas de la SPA. Deliberadamente NO se usa
+  # CustomErrorResponses (403/404 -> index.html): eso es a nivel de
+  # distribución completa, no por origen, así que también interceptaría
+  # los 404 reales que devuelve la API (p.ej. GetDayFunction cuando un día
+  # aún no tiene datos — ver lambdas/api/handler.py) y los sustituiría por
+  # index.html con 200. En su lugar, se reescribe en el propio origen S3
+  # cualquier ruta sin extensión (las rutas de cliente de la SPA) a
+  # /index.html antes de llegar a S3; los ficheros estáticos reales
+  # (*.js, *.css, favicon.ico, ...) pasan sin tocar.
+  SpaFallbackFunction:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: !Sub "zamora-trains-spa-fallback-${Environment}"
+      AutoPublish: true
+      FunctionConfig:
+        Comment: "Sirve index.html para rutas de cliente sin extensión de fichero"
+        Runtime: cloudfront-js-2.0
+      FunctionCode: |
+        function handler(event) {
+            var request = event.request;
+            var uri = request.uri;
+            var lastSegment = uri.split('/').pop();
+            if (!lastSegment.includes('.')) {
+                request.uri = '/index.html';
+            }
+            return request;
+        }
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "Zamora Train Observability — frontend (${Environment})"
+        DefaultRootObject: index.html
+        Aliases: !If
+          - HasCustomDomain
+          - - !Ref DomainName
+            - !Sub "www.${DomainName}"
+          - !Ref AWS::NoValue
+        ViewerCertificate: !If
+          - HasCustomDomain
+          - AcmCertificateArn: !Ref FrontendCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref FrontendOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ""   # legado: la autorización real la da OriginAccessControlId
+          - Id: ApiGatewayOrigin
+            DomainName: !Sub "${TrainsApi}.execute-api.${AWS::Region}.amazonaws.com"
+            OriginPath: !Sub "/${Environment}"   # sustituye al /prod que el visitante ya no ve
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              HTTPPort: 80
+              HTTPSPort: 443
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6   # managed policy: CachingOptimized
+          FunctionAssociations:
+            - EventType: viewer-request
+              FunctionARN: !GetAtt SpaFallbackFunction.FunctionARN
+        CacheBehaviors:
+          # API bajo /api en el mismo dominio: mismo origin que la web, sin
+          # CORS (same-origin) y sin /prod visible en el path público.
+          - PathPattern: "/api/*"
+            TargetOriginId: ApiGatewayOrigin
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS]
+            CachedMethods: [GET, HEAD]
+            Compress: true
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad        # managed policy: CachingDisabled (datos dinámicos, refrescan cada 5 min)
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac  # managed policy: AllViewerExceptHostHeader
+            FunctionAssociations:
+              - EventType: viewer-request
+                FunctionARN: !GetAtt ApiPathRewriteFunction.FunctionARN
+      Tags:
+        - Key: Project
+          Value: ZamoraTrainObservability
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Alias A/AAAA hacia CloudFront. Z2FDTNDATAQYW2 es la "hosted zone" fija
+  # que AWS asigna a todas las distribuciones CloudFront como target de
+  # alias (constante pública de AWS, no depende de esta distribución ni de
+  # la región del stack).
+  FrontendDnsRecordApex:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt FrontendDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+        EvaluateTargetHealth: false
+
+  FrontendDnsRecordApexV6:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref DomainName
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt FrontendDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+        EvaluateTargetHealth: false
+
+  FrontendDnsRecordWww:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "www.${DomainName}"
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt FrontendDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+        EvaluateTargetHealth: false
+
+  FrontendDnsRecordWwwV6:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Sub "www.${DomainName}"
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt FrontendDistribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+        EvaluateTargetHealth: false
 
   # ── CloudWatch: Alarma de retrasos grandes ──────────────────────────────────
   HighDelayAlarm:
@@ -914,13 +1121,32 @@ Outputs:
     Value: !Ref XApiCredentialsSecret
 
   TrainsApiBaseUrl:
-    Description: "URL base del API HTTP de trenes (usar como VITE_API_BASE_URL)"
+    Description: "URL directa del API HTTP de trenes (endpoint execute-api, incluye el stage del entorno)"
     Value: !Sub "https://${TrainsApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}"
 
+  ApiBaseUrl:
+    Description: >-
+      URL base recomendada para el frontend (usar como VITE_API_BASE_URL): vía
+      CloudFront bajo /api en el mismo dominio que sirve la web (el propio si
+      hay DomainName, si no el *.cloudfront.net), sin el stage en el path.
+    Value: !If
+      - HasCustomDomain
+      - !Sub "https://${DomainName}/api"
+      - !Sub "https://${FrontendDistribution.DomainName}/api"
+
   FrontendBucketName:
-    Description: "Bucket S3 del frontend estático"
+    Description: "Bucket S3 del frontend estático (privado, solo accesible vía CloudFront)"
     Value: !Ref FrontendBucket
 
-  FrontendWebsiteUrl:
-    Description: "URL del sitio estático (S3 website hosting, sin CloudFront)"
-    Value: !GetAtt FrontendBucket.WebsiteURL
+  FrontendDistributionId:
+    Description: "Id de la distribución CloudFront (usar para invalidar caché tras cada deploy del frontend)"
+    Value: !Ref FrontendDistribution
+
+  FrontendDistributionDomainName:
+    Description: "Dominio *.cloudfront.net del frontend — usar si DomainName está vacío"
+    Value: !GetAtt FrontendDistribution.DomainName
+
+  FrontendCustomDomainUrl:
+    Condition: HasCustomDomain
+    Description: "URL pública del frontend en el dominio propio"
+    Value: !Sub "https://${DomainName}"

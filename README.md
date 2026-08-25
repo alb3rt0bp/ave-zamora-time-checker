@@ -388,10 +388,15 @@ ARN como secret `AWS_DEPLOY_ROLE_ARN` en los *environments* `dev`/`prod` de GitH
 Requisitos: `aws-cli` v2, `sam-cli`, Python 3.12, permisos de despliegue en AWS.
 
 El script compila los horarios, crea el bucket de artefactos SAM, hace `sam build`
-(en contenedor) + `sam deploy`, y muestra los outputs — incluidos `TrainsApiBaseUrl`,
-`FrontendBucketName` y `FrontendWebsiteUrl`, que necesita el paso siguiente. La tabla
-Athena queda lista para consultar inmediatamente, sin pasos adicionales.
-Región por defecto: `eu-south-2` (España).
+(en contenedor) + `sam deploy`, y muestra los outputs — incluidos `ApiBaseUrl`,
+`FrontendBucketName` y `FrontendDistributionId`/`FrontendDistributionDomainName`
+(o `FrontendCustomDomainUrl` si hay dominio propio), que necesita el paso
+siguiente. La tabla Athena queda lista para consultar inmediatamente, sin pasos
+adicionales. Región por defecto: `eu-south-2` (España).
+
+Para poner el frontend bajo un dominio propio (p.ej. `zamorave.com`) con HTTPS,
+ver [`infrastructure/DOMAIN_SETUP.md`](infrastructure/DOMAIN_SETUP.md) — añade
+los flags `--domain`/`--hosted-zone-id`/`--certificate-arn` a `deploy.sh`.
 
 ### 3. Despliegue del frontend
 
@@ -401,13 +406,18 @@ Región por defecto: `eu-south-2` (España).
 
 Requisitos: `aws-cli` v2, Node.js/npm (instalar con [nvm](https://github.com/nvm-sh/nvm)
 o Homebrew). Debe ejecutarse **después** de `deploy.sh` para ese mismo entorno: el
-script lee `TrainsApiBaseUrl` y `FrontendBucketName` del stack (`aws cloudformation
+script lee `ApiBaseUrl` y `FrontendBucketName` del stack (`aws cloudformation
 describe-stacks`) y falla con un mensaje claro si el stack todavía no existe.
 
 Pasos que ejecuta: `npm ci` en `frontend/`, `npm run build` inyectando la URL del
-API como `VITE_API_BASE_URL` (variable de entorno de Vite, solo en build time), y
-`aws s3 sync dist/ s3://<bucket>/ --delete`. Al final imprime `FrontendWebsiteUrl`
-(el endpoint de S3 website hosting — sin CloudFront por ahora, por simplicidad).
+API como `VITE_API_BASE_URL` (variable de entorno de Vite, solo en build time),
+`aws s3 sync dist/ s3://<bucket>/ --delete` e invalida la caché de CloudFront
+(`aws cloudfront create-invalidation`, necesario porque el bucket ya no es
+público — se sirve vía CloudFront con Origin Access Control). Al final imprime
+la URL pública del frontend (dominio propio si está configurado, si no el
+`*.cloudfront.net`). La API queda expuesta en el mismo dominio bajo `/api`
+(sin el stage `/prod`/`/dev` visible en el path), así que en producción no hace
+falta CORS entre frontend y API — son same-origin.
 
 Para desarrollo local del frontend contra una API ya desplegada:
 

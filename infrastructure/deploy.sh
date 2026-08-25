@@ -2,16 +2,35 @@
 # deploy.sh — Despliega el stack completo con AWS SAM
 # Requisitos: aws-cli v2, sam-cli, Python 3.12, permisos de despliegue en AWS
 # Uso: ./infrastructure/deploy.sh [dev|staging|prod] [--alert-email tu@email.com]
+#        [--domain zamorave.com --hosted-zone-id Z... --certificate-arn arn:aws:acm:us-east-1:...]
+# Los tres flags de dominio son opcionales pero van juntos (ver
+# infrastructure/DOMAIN_SETUP.md para obtener hosted-zone-id y certificate-arn,
+# ninguno de los dos automatizable desde este script).
 
 set -euo pipefail
 
 ENVIRONMENT="dev"
 ALERT_EMAIL=""
+DOMAIN_NAME=""
+HOSTED_ZONE_ID=""
+CERTIFICATE_ARN=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --alert-email)
             ALERT_EMAIL="${2:-}"
+            shift 2
+            ;;
+        --domain)
+            DOMAIN_NAME="${2:-}"
+            shift 2
+            ;;
+        --hosted-zone-id)
+            HOSTED_ZONE_ID="${2:-}"
+            shift 2
+            ;;
+        --certificate-arn)
+            CERTIFICATE_ARN="${2:-}"
             shift 2
             ;;
         *)
@@ -20,6 +39,14 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -n "${DOMAIN_NAME}" ] && { [ -z "${HOSTED_ZONE_ID}" ] || [ -z "${CERTIFICATE_ARN}" ]; }; then
+    echo "Error: --domain requiere también --hosted-zone-id y --certificate-arn."
+    echo "  Ver infrastructure/DOMAIN_SETUP.md para obtenerlos (registro del"
+    echo "  dominio + despliegue de infrastructure/certificate-us-east-1.yaml,"
+    echo "  ninguno de los dos automatizable desde este script)."
+    exit 1
+fi
 
 STACK_NAME="zamora-train-observability-${ENVIRONMENT}"
 AWS_REGION="${AWS_DEFAULT_REGION:-eu-south-2}"   # España (Zaragoza)
@@ -68,6 +95,9 @@ echo ">>> Paso 4: SAM deploy..."
 PARAMS="Environment=${ENVIRONMENT} AwsRegion=${AWS_REGION} ZamoraStationCode=30200 PollingWindowMinutes=30"
 if [ -n "${ALERT_EMAIL}" ]; then
     PARAMS="${PARAMS} AlertEmailAddress=${ALERT_EMAIL}"
+fi
+if [ -n "${DOMAIN_NAME}" ]; then
+    PARAMS="${PARAMS} DomainName=${DOMAIN_NAME} HostedZoneId=${HOSTED_ZONE_ID} FrontendCertificateArn=${CERTIFICATE_ARN}"
 fi
 
 sam deploy \

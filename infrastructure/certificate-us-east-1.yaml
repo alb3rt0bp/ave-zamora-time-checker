@@ -1,0 +1,50 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  Certificado ACM para el dominio propio del frontend de Zamora Train
+  Observability (infrastructure/template.yaml). Stack DELIBERADAMENTE
+  separado del stack principal: CloudFront exige que el certificado viva
+  en us-east-1, sea cual sea la región del resto del stack (el stack
+  principal usa AwsRegion=eu-south-2) — CloudFormation no admite recursos
+  de dos regiones distintas en un mismo stack, de ahí el split.
+  
+  El ARN emitido (Output CertificateArn) se pasa como parámetro
+  FrontendCertificateArn al desplegar infrastructure/template.yaml.
+
+Parameters:
+  DomainName:
+    Type: String
+    Default: zamorave.com
+    Description: Dominio propio del frontend.
+
+  HostedZoneId:
+    Type: String
+    Description: >
+      Id de la Hosted Zone pública de Route53 para DomainName (creada
+      automáticamente al registrar el dominio en Route53 Domains).
+      Obtenerla con: aws route53 list-hosted-zones-by-name --dns-name
+      <DomainName> --query "HostedZones[0].Id" --output text
+
+Resources:
+  FrontendCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Ref DomainName
+      SubjectAlternativeNames:
+        - !Sub "www.${DomainName}"
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZoneId
+        - DomainName: !Sub "www.${DomainName}"
+          HostedZoneId: !Ref HostedZoneId
+      Tags:
+        - Key: Project
+          Value: ZamoraTrainObservability
+
+Outputs:
+  CertificateArn:
+    Description: >
+      ARN del certificado — pasar como parámetro FrontendCertificateArn al
+      desplegar infrastructure/template.yaml.
+    Value: !Ref FrontendCertificate

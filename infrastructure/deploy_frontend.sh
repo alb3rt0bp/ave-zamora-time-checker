@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # deploy_frontend.sh — Compila el frontend y lo sincroniza al bucket S3 estático
 # Requisitos: aws-cli v2, npm, y que ./infrastructure/deploy.sh ya se haya
-# ejecutado para ese entorno (necesita los outputs TrainsApiBaseUrl y
-# FrontendBucketName del stack).
+# ejecutado para ese entorno (necesita los outputs ApiBaseUrl,
+# FrontendBucketName y FrontendDistributionId del stack).
 # Uso: ./infrastructure/deploy_frontend.sh [dev|staging|prod]
 
 set -euo pipefail
@@ -29,7 +29,7 @@ echo ">>> Paso 1: Leyendo outputs del stack ${STACK_NAME}..."
 API_BASE_URL="$(aws cloudformation describe-stacks \
     --stack-name "${STACK_NAME}" \
     --region "${AWS_REGION}" \
-    --query "Stacks[0].Outputs[?OutputKey=='TrainsApiBaseUrl'].OutputValue" \
+    --query "Stacks[0].Outputs[?OutputKey=='ApiBaseUrl'].OutputValue" \
     --output text 2>/dev/null || true)"
 
 FRONTEND_BUCKET_NAME="$(aws cloudformation describe-stacks \
@@ -38,7 +38,13 @@ FRONTEND_BUCKET_NAME="$(aws cloudformation describe-stacks \
     --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" \
     --output text 2>/dev/null || true)"
 
-if [ -z "${API_BASE_URL}" ] || [ -z "${FRONTEND_BUCKET_NAME}" ]; then
+FRONTEND_DISTRIBUTION_ID="$(aws cloudformation describe-stacks \
+    --stack-name "${STACK_NAME}" \
+    --region "${AWS_REGION}" \
+    --query "Stacks[0].Outputs[?OutputKey=='FrontendDistributionId'].OutputValue" \
+    --output text 2>/dev/null || true)"
+
+if [ -z "${API_BASE_URL}" ] || [ -z "${FRONTEND_BUCKET_NAME}" ] || [ -z "${FRONTEND_DISTRIBUTION_ID}" ]; then
     echo "Error: no se encontraron los outputs del stack '${STACK_NAME}'."
     echo "       Ejecuta primero ./infrastructure/deploy.sh ${ENVIRONMENT}"
     exit 1
@@ -46,6 +52,7 @@ fi
 
 echo "    API base URL:      ${API_BASE_URL}"
 echo "    Frontend bucket:   ${FRONTEND_BUCKET_NAME}"
+echo "    CloudFront dist.:  ${FRONTEND_DISTRIBUTION_ID}"
 
 # ── 2. Instalar dependencias ──────────────────────────────────────────────────
 echo ""
@@ -62,13 +69,25 @@ echo ""
 echo ">>> Paso 4: aws s3 sync..."
 aws s3 sync "${REPO_ROOT}/frontend/dist/" "s3://${FRONTEND_BUCKET_NAME}/" --delete
 
-# ── 5. Mostrar la URL del sitio ────────────────────────────────────────────────
+# ── 5. Invalidar caché de CloudFront ─────────────────────────────────────────
+# Necesario porque el bucket ahora es privado y se sirve vía CloudFront: sin
+# invalidar, los visitantes seguirían viendo los ficheros cacheados del
+# deploy anterior hasta que expire el TTL de CachingOptimized.
 echo ""
-echo ">>> Paso 5: URL del frontend:"
+echo ">>> Paso 5: Invalidando caché de CloudFront..."
+aws cloudfront create-invalidation \
+    --distribution-id "${FRONTEND_DISTRIBUTION_ID}" \
+    --paths "/*" \
+    --query "Invalidation.Id" \
+    --output text
+
+# ── 6. Mostrar la URL del sitio ────────────────────────────────────────────────
+echo ""
+echo ">>> Paso 6: URL del frontend:"
 aws cloudformation describe-stacks \
     --stack-name "${STACK_NAME}" \
     --region "${AWS_REGION}" \
-    --query "Stacks[0].Outputs[?OutputKey=='FrontendWebsiteUrl'].OutputValue" \
+    --query "Stacks[0].Outputs[?OutputKey=='FrontendCustomDomainUrl' || OutputKey=='FrontendDistributionDomainName'].OutputValue" \
     --output text
 
 echo ""
