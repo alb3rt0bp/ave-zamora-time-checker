@@ -1,8 +1,10 @@
 -- ============================================================
 -- query_examples.sql
 -- Queries Athena para el Data Lake de trenes Zamora
--- Workgroup: zamora-trains-prod
--- Database:  zamora_trains_db
+-- Workgroup: zamora-trains-{Environment} (p.ej. zamora-trains-prod)
+-- Database:  zamora_trains_db_{Environment} (p.ej. zamora_trains_db_prod) —
+--            usa USE zamora_trains_db_prod; antes de estas queries, o
+--            cualifica cada FROM zamora_trains como database.zamora_trains
 -- Table:     zamora_trains (definida en infrastructure/template.yaml, sin Crawler)
 -- ============================================================
 

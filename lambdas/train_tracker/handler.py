@@ -2,12 +2,18 @@
 handler.py — Lambda: train-tracker (lambda_handler) + daily-dump (daily_dump_handler)
 
 lambda_handler se ejecuta cada 5 minutos por EventBridge Scheduler:
+0. Resuelve el horario de trenes de HOY (ver schedule_resolver.py): caché en
+   S3 (schedules/{fecha}.json) → si no existe, descarga y parsea el GTFS
+   estático de Renfe y la cachea → si todo eso falla, cae al fichero
+   estático embebido (train_schedules.json) y avisa por email. Solo el
+   primer ciclo del día que no encuentre ya la caché en S3 llega a
+   descargar/parsear GTFS; el resto del día lee la caché.
 1. En el primer ciclo del día, siembra en DynamoDB un placeholder por cada
-   tren programado hoy (_seed_todays_trains), para que el listado del día
+   tren de ese horario (_seed_todays_trains), para que el listado del día
    esté disponible desde el primer momento.
 2. Determina qué trenes tienen ventana activa ahora mismo (ver
    schedule_matcher.py: la ventana depende del sentido y, para Madrid, del
-   último retraso conocido en DynamoDB).
+   último retraso conocido en DynamoDB) sobre ese mismo horario del día.
 3. Descarga flotaLD.json de Renfe.
 4. Para cada tren activo, busca su entrada en la flota y actualiza su estado
    en DynamoDB. Punto de "entrega" según el sentido:
@@ -30,9 +36,10 @@ hasta las 00:30, dejando margen de sobra). Los trenes que nunca se marcaron
 huelga) se vuelcan igualmente, marcados con 'cancelado': true y
 'minutos_retraso': null, para que consten en la observabilidad sin
 contaminar medias/estadísticas de retraso (NULL se ignora en AVG() y
-similares). No hay escritura a S3 durante el polling — todo el estado vive
-en DynamoDB hasta el volcado diario, para minimizar el número de objetos
-que Athena tiene que leer (sin capa gratuita de consultas).
+similares). El estado de cada tren vive en DynamoDB hasta el volcado diario,
+para minimizar el número de objetos que Athena tiene que leer (sin capa
+gratuita de consultas) — la única escritura a S3 durante el polling es la
+caché del horario del día (schedules/{fecha}.json, una vez al día).
 """
 
 import json
@@ -49,6 +56,7 @@ from datalake_writer import DatalakeWriter
 from metrics_writer import MetricsWriter
 from gtfsrt_client import GtfsRtClient
 from gtfsrt_matcher import find_stop_time_update
+from schedule_resolver import resolve_todays_schedule
 
 logger = logging.getLogger("train_tracker")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -82,8 +90,12 @@ dynamodb = boto3.resource("dynamodb")
 s3       = boto3.client("s3")
 sns      = boto3.client("sns")
 
+
+# Fallback estático (todos los tipo_dia mezclados) para cuando la resolución
+# desde GTFS falla o está desactivada — ver schedule_resolver.py, que filtra
+# esto a los trenes de hoy antes de dárselo a ScheduleMatcher.
 with open(SCHEDULES_FILE, "r", encoding="utf-8") as fh:
-    schedules_config = json.load(fh)
+    static_schedule_fallback = json.load(fh)
 
 state_table = dynamodb.Table(DYNAMODB_TABLE)
 metrics_table = dynamodb.Table(DYNAMODB_METRICS_TABLE)
@@ -97,7 +109,6 @@ def lambda_handler(event, context):
 
     # ── Instancias de módulos ─────────────────────────────────────────────────────
     renfe_client = RenfeClient(log_extra)
-    matcher = ScheduleMatcher(schedules_config, log_extra)
 
     now_utc = datetime.now(timezone.utc)
     # Renfe opera en hora peninsular española (UTC+1 / UTC+2)
@@ -107,9 +118,21 @@ def lambda_handler(event, context):
 
     logger.info("Ejecución iniciada: %s (local: %s)", now_utc.isoformat(), now_local.isoformat(), extra=log_extra)
 
-    # 0. Primer ciclo del día: sembrar en DynamoDB un placeholder por cada
-    # tren programado hoy, para que el listado esté disponible desde ya.
-    _seed_todays_trains(now_local, log_extra)
+    # 0. Horario de hoy: caché en S3 → GTFS (y cachear) → fallback estático.
+    # Tanto el sembrado como las ventanas de polling de todo el día se
+    # calculan sobre este mismo resultado (ver schedule_resolver.py).
+    todays_schedule = resolve_todays_schedule(
+        s3, S3_BUCKET, now_local.date(), ZAMORA_CODE, CHAMARTIN_CODE,
+        static_schedule_fallback,
+        lambda msg: _publish_schedule_fallback_alert(msg, log_extra),
+        log_extra,
+    )
+    trains_today = todays_schedule["trains"]
+    matcher = ScheduleMatcher(todays_schedule, log_extra)
+
+    # Primer ciclo del día: sembrar en DynamoDB un placeholder por cada tren
+    # programado hoy, para que el listado esté disponible desde ya.
+    _seed_todays_trains(now_local, trains_today, log_extra)
 
     # 1. ¿Qué trenes tienen ventana activa ahora? Para Madrid, el cierre de
     # ventana depende del último retraso conocido en DynamoDB.
@@ -155,7 +178,7 @@ def lambda_handler(event, context):
     # 3. Trenes Madrid cuya ventana ya cerró sin haber sido detectados como
     # llegados (ni Chamartín ni desaparición) → resolver con últimos datos
     # conocidos para no perder el dato de puntualidad de ese día.
-    resolved = _resolve_expired_madrid_trains(now_local, log_extra)
+    resolved = _resolve_expired_madrid_trains(now_local, trains_today, log_extra)
     processed += resolved
 
     logger.info(
@@ -166,10 +189,11 @@ def lambda_handler(event, context):
     return {"statusCode": 200, "active": len(active_trains), "recorded": processed}
 
 
-def _seed_todays_trains(now_local: datetime, log_extra: dict) -> None:
+def _seed_todays_trains(now_local: datetime, trains_today: list[dict], log_extra: dict) -> None:
     """
     Siembra en DynamoDB un placeholder ('entregado': False, sin datos de
-    Renfe todavía) para cada tren programado hoy, si no se ha hecho ya.
+    Renfe todavía) para cada tren de trains_today (ya resuelto para hoy por
+    schedule_resolver.py — GTFS o fallback estático), si no se ha hecho ya.
     Así el listado de trenes del día está disponible desde el primer ciclo,
     en vez de ir apareciendo poco a poco a medida que cada tren se procesa.
 
@@ -184,14 +208,10 @@ def _seed_todays_trains(now_local: datetime, log_extra: dict) -> None:
     if marker:
         return
 
-    tipo_dia = _tipo_dia_for(now_local)
     ttl = _end_of_day_ttl(now_local)
     seeded = 0
 
-    for train in schedules_config["trains"]:
-        if train["tipo_dia"] != tipo_dia:
-            continue
-
+    for train in trains_today:
         try:
             state_table.put_item(
                 Item={
@@ -213,17 +233,7 @@ def _seed_todays_trains(now_local: datetime, log_extra: dict) -> None:
             pass  # ya existía (p. ej. ejecuciones solapadas); no se sobrescribe
 
     state_table.put_item(Item={"pk": seed_marker_pk, "ttl": ttl})
-    logger.info("Sembrados %d trenes de hoy (%s) en DynamoDB", seeded, tipo_dia, extra=log_extra)
-
-
-def _tipo_dia_for(now_local: datetime) -> str:
-    weekday = now_local.weekday()  # 0=Lunes … 6=Domingo
-    if weekday in (0, 1, 2, 3, 4):
-        return "laborable"
-    elif weekday == 5:
-        return "sabado"
-    else:
-        return "domingo"
+    logger.info("Sembrados %d trenes de hoy (%s) en DynamoDB", seeded, today, extra=log_extra)
 
 
 def _fetch_gtfsrt_entities(log_extra: dict) -> list[dict]:
@@ -728,7 +738,32 @@ def _publish_negative_delay_alert(cod: str, sentido: str, ult_retraso_original: 
         )
 
 
-def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict) -> int:
+def _publish_schedule_fallback_alert(message: str, log_extra: dict) -> None:
+    """
+    Notifica por email (vía AlertTopic/SNS, mismo topic que
+    _publish_negative_delay_alert) que schedule_resolver.py ha tenido que
+    recurrir al fichero estático de reserva en vez de resolver el horario
+    del día desde GTFS. A diferencia de los enriquecimientos aditivos de
+    este proyecto, el horario del día es crítico para saber qué trenes
+    monitorizar, así que este aviso no es opcional aunque el email de
+    alertas no esté configurado — solo se omite el envío en sí.
+    """
+    if not DATA_QUALITY_ALERT_SNS_TOPIC_ARN:
+        logger.error("%s (sin DATA_QUALITY_ALERT_SNS_TOPIC_ARN configurado, no se envía email)", message, extra=log_extra)
+        return
+
+    try:
+        sns.publish(
+            TopicArn=DATA_QUALITY_ALERT_SNS_TOPIC_ARN,
+            Subject="[Zamora Trains] Horario del día resuelto con fallback estático",
+            Message=message,
+        )
+        logger.info("Alerta de fallback de horario del día publicada", extra=log_extra)
+    except Exception as exc:
+        logger.error("Error publicando alerta de fallback de horario del día: %s", exc, extra=log_extra)
+
+
+def _resolve_expired_madrid_trains(now_local: datetime, trains_today: list[dict], log_extra: dict) -> int:
     """
     Recorre los trenes Madrid con estado pendiente en DynamoDB (no 'entregado')
     cuya ventana (hora_llegada_destino + último retraso conocido + 10 min)
@@ -746,7 +781,7 @@ def _resolve_expired_madrid_trains(now_local: datetime, log_extra: dict) -> int:
     excluye del volcado, y el TTL lo limpia solo.
     """
     resolved = 0
-    for train in schedules_config["trains"]:
+    for train in trains_today:
         if train["sentido"] != "Madrid":
             continue
 

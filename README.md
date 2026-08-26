@@ -342,11 +342,12 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
 | `PollingWindowMinutes` | (config JSON) | `30` | Ventana ± en minutos |
 | `AlertEmailAddress` | `DATA_QUALITY_ALERT_SNS_TOPIC_ARN` (indirecto, vía `AlertTopic`) | `albertobp@gmail.com` | Si vacío, no se crea `AlertTopic` ni la alarma SNS |
 | `NegativeDelayAnomalyThresholdMinutes` | `NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES` | `-10` | Umbral por debajo del cual un `ultRetraso` se considera bug de Renfe y se recalcula |
-| `GlueDatabaseName` | — | `zamora_trains_db` | Base de datos Glue |
 | `DelayAlertThresholdMinutes` | `DELAY_ALERT_THRESHOLD_MINUTES` | `15` | Retraso mínimo (min) al marcar un tren entregado para publicar alerta de tuit |
 | `FlagshipMadridTrainCode` | `FLAGSHIP_MADRID_TRAIN_CODE` | `04154` | Tren madrugador: dispara alerta de tuit siempre, tenga o no retraso |
 | `ClaudeModelId` | `CLAUDE_MODEL_ID` | `global.anthropic.claude-sonnet-4-6` | Modelo Bedrock (inference profile) usado por `tweet_notifier` |
 | `GtfsRtEnrichmentEnabled` | `GTFS_RT_ENRICHMENT_ENABLED` | `false` | Activa el enriquecimiento aditivo con el feed GTFS-RT oficial de Renfe |
+| `GtfsScheduleEnabled` | `GTFS_SCHEDULE_ENABLED` | `false` | Resuelve el horario del día desde el GTFS estático de Renfe en vez de `train_schedules.json` (fallback si falla) |
+| `GtfsZipUrl` | `GTFS_ZIP_URL` | URL del GTFS estático | Solo relevante si `GtfsScheduleEnabled=true` |
 | — | `XFETCH_TRENDS_ENABLED` | `true` | Activa el enriquecimiento con tendencias reales de xfetch.io en `tweet_notifier` |
 
 ---
@@ -442,10 +443,12 @@ workflow — por ahora se ejecuta a mano tras cada despliegue de backend relevan
 
 ## Consultas
 
-Ver `scripts/query_examples.sql` para queries Athena listas para usar. Ejemplo rápido:
+Ver `scripts/query_examples.sql` para queries Athena listas para usar. La base
+de datos Glue lleva sufijo de entorno (`zamora_trains_db_prod`,
+`zamora_trains_db_dev`, ...). Ejemplo rápido en prod:
 
 ```sql
-SELECT * FROM zamora_trains_db.zamora_trains LIMIT 10;
+SELECT * FROM zamora_trains_db_prod.zamora_trains LIMIT 10;
 ```
 
 ---
@@ -461,3 +464,6 @@ SELECT * FROM zamora_trains_db.zamora_trains LIMIT 10;
 - Los errores de red se registran y la Lambda retorna con gracia — la siguiente
   ejecución (5 min después) reintenta automáticamente.
 ```
+
+### Consulta diaria de horarios 
+https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip

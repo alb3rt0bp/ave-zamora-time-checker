@@ -8,6 +8,11 @@ from tests.dummies.reference_dates import MONDAY
 
 TZ = ZoneInfo("Europe/Madrid")
 
+TRAINS_TODAY = [
+    {"cod_comercial": "M100", "sentido": "Madrid", "hora_salida": "07:00", "hora_llegada_destino": "08:30"},
+    {"cod_comercial": "G100", "sentido": "Galicia", "hora_salida": "08:00", "hora_llegada_destino": "09:30"},
+]
+
 
 def _at(hh, mm):
     return datetime(MONDAY.year, MONDAY.month, MONDAY.day, hh, mm, tzinfo=TZ)
@@ -15,8 +20,9 @@ def _at(hh, mm):
 
 class TestResolveExpiredMadridTrains(HandlerTestCase):
     """
-    El fixture de horarios (tests/dummies/train_schedules_sample.json) define
-    M100 (Madrid, laborable, hora_llegada_destino 08:30) y G100 (Galicia).
+    TRAINS_TODAY define M100 (Madrid, hora_llegada_destino 08:30) y G100
+    (Galicia) — la misma lista que le pasaría lambda_handler tras resolver
+    el horario del día (ver schedule_resolver.py).
     """
 
     def _put_state(self, cod, now, **overrides):
@@ -30,13 +36,13 @@ class TestResolveExpiredMadridTrains(HandlerTestCase):
         self.table.put_item(Item=item)
 
     def test_no_state_at_all_is_skipped(self):
-        resolved = self.handler._resolve_expired_madrid_trains(_at(23, 0), SAMPLE_LOG_EXTRA)
+        resolved = self.handler._resolve_expired_madrid_trains(_at(23, 0), TRAINS_TODAY, SAMPLE_LOG_EXTRA)
         self.assertEqual(resolved, 0)
 
     def test_already_entregado_is_skipped(self):
         self._put_state("M100", _at(23, 0), entregado=True)
 
-        resolved = self.handler._resolve_expired_madrid_trains(_at(23, 0), SAMPLE_LOG_EXTRA)
+        resolved = self.handler._resolve_expired_madrid_trains(_at(23, 0), TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         self.assertEqual(resolved, 0)
 
@@ -44,7 +50,7 @@ class TestResolveExpiredMadridTrains(HandlerTestCase):
         # 08:30 + 0 + 10 = 08:40 → a las 08:39 sigue dentro de ventana.
         self._put_state("M100", _at(8, 39))
 
-        resolved = self.handler._resolve_expired_madrid_trains(_at(8, 39), SAMPLE_LOG_EXTRA)
+        resolved = self.handler._resolve_expired_madrid_trains(_at(8, 39), TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         self.assertEqual(resolved, 0)
         item = self.get_item("M100", _at(8, 39).date().isoformat())
@@ -54,7 +60,7 @@ class TestResolveExpiredMadridTrains(HandlerTestCase):
         # ventana = 08:30 + 7 (retraso) + 10 = 08:47; a las 08:48 ya cerró.
         self._put_state("M100", _at(8, 48), ult_retraso=7)
 
-        resolved = self.handler._resolve_expired_madrid_trains(_at(8, 48), SAMPLE_LOG_EXTRA)
+        resolved = self.handler._resolve_expired_madrid_trains(_at(8, 48), TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         self.assertEqual(resolved, 1)
         item = self.get_item("M100", _at(8, 48).date().isoformat())
@@ -69,7 +75,7 @@ class TestResolveExpiredMadridTrains(HandlerTestCase):
         # y así se queda si nunca hay datos reales de Renfe.
         self._put_state("M100", _at(8, 48), capturado_en_zamora=False)
 
-        resolved = self.handler._resolve_expired_madrid_trains(_at(8, 48), SAMPLE_LOG_EXTRA)
+        resolved = self.handler._resolve_expired_madrid_trains(_at(8, 48), TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         self.assertEqual(resolved, 0)
         item = self.get_item("M100", _at(8, 48).date().isoformat())
@@ -78,7 +84,7 @@ class TestResolveExpiredMadridTrains(HandlerTestCase):
     def test_galicia_trains_are_never_touched(self):
         self._put_state("G100", _at(23, 0))  # sentido Galicia en el fixture
 
-        resolved = self.handler._resolve_expired_madrid_trains(_at(23, 0), SAMPLE_LOG_EXTRA)
+        resolved = self.handler._resolve_expired_madrid_trains(_at(23, 0), TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         self.assertEqual(resolved, 0)
         item = self.get_item("G100", _at(23, 0).date().isoformat())

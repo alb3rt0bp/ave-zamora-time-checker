@@ -9,30 +9,33 @@ from tests.dummies.reference_dates import MONDAY
 TZ = ZoneInfo("Europe/Madrid")
 NOW = datetime(MONDAY.year, MONDAY.month, MONDAY.day, 5, 0, tzinfo=TZ)
 
+TRAINS_TODAY = [
+    {
+        "cod_comercial": "M100", "sentido": "Madrid", "tipo_dia": "laborable",
+        "hora_salida": "07:00", "hora_llegada_destino": "08:30",
+    },
+    {
+        "cod_comercial": "G100", "sentido": "Galicia", "tipo_dia": "laborable",
+        "hora_salida": "08:00", "hora_llegada_destino": "09:30",
+    },
+]
+
 
 class TestSeedTodaysTrains(HandlerTestCase):
     """
-    El fixture de horarios (tests/dummies/train_schedules_sample.json) define,
-    para 'laborable' (que es lo que toca un lunes), M100 (Madrid) y G100
-    (Galicia); M200/G200 son de 'domingo' y no deben sembrarse hoy.
+    _seed_todays_trains ya no decide qué trenes son "de hoy" — eso es
+    responsabilidad de schedule_resolver.py (con sus propios tests). Aquí se
+    le pasa ya la lista resuelta, tal y como haría lambda_handler.
     """
 
-    def test_seeds_placeholder_for_each_train_matching_todays_tipo_dia(self):
-        self.handler._seed_todays_trains(NOW, SAMPLE_LOG_EXTRA)
+    def test_seeds_placeholder_for_each_train_received(self):
+        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
-        m100 = self.get_item("M100", "2026-01-05")
-        g100 = self.get_item("G100", "2026-01-05")
-        self.assertIsNotNone(m100)
-        self.assertIsNotNone(g100)
-
-    def test_does_not_seed_trains_of_a_different_tipo_dia(self):
-        self.handler._seed_todays_trains(NOW, SAMPLE_LOG_EXTRA)
-
-        self.assertIsNone(self.get_item("M200", "2026-01-05"))
-        self.assertIsNone(self.get_item("G200", "2026-01-05"))
+        self.assertIsNotNone(self.get_item("M100", "2026-01-05"))
+        self.assertIsNotNone(self.get_item("G100", "2026-01-05"))
 
     def test_placeholder_shape(self):
-        self.handler._seed_todays_trains(NOW, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", "2026-01-05")
         self.assertEqual(item["sentido"], "Madrid")
@@ -44,13 +47,13 @@ class TestSeedTodaysTrains(HandlerTestCase):
         self.assertIn("ttl", item)
 
     def test_creates_seed_marker(self):
-        self.handler._seed_todays_trains(NOW, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         marker = self.table.get_item(Key={"pk": "SEED#2026-01-05"}).get("Item")
         self.assertIsNotNone(marker)
 
     def test_second_call_is_a_noop(self):
-        self.handler._seed_todays_trains(NOW, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
         # Simula progreso real tras el primer sembrado.
         self.table.update_item(
             Key={"pk": f"M100#2026-01-05"},
@@ -58,7 +61,7 @@ class TestSeedTodaysTrains(HandlerTestCase):
             ExpressionAttributeValues={":v": 12},
         )
 
-        self.handler._seed_todays_trains(NOW, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", "2026-01-05")
         self.assertEqual(item["ult_retraso"], 12)  # no se ha vuelto a pisar con el placeholder
@@ -68,7 +71,7 @@ class TestSeedTodaysTrains(HandlerTestCase):
         # marcador aún no se ha escrito, el PutItem condicional no debe pisarlo.
         self.table.put_item(Item={"pk": "M100#2026-01-05", "entregado": True, "ult_retraso": 99})
 
-        self.handler._seed_todays_trains(NOW, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", "2026-01-05")
         self.assertTrue(item["entregado"])

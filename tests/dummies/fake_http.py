@@ -58,3 +58,19 @@ def fake_urlopen_by_url(url_to_payload: dict):
         raise AssertionError(f"URL inesperada en fake_urlopen_by_url: {req.full_url}")
 
     return _side_effect
+
+
+def fake_urlopen_dispatch(url_to_response: dict):
+    """
+    Como fake_urlopen_by_url, pero despachando una respuesta YA construida
+    (típicamente un FakeHTTPResponse) en vez de serializar siempre a JSON —
+    necesario cuando alguna de las URLs no devuelve JSON (p. ej. el zip GTFS
+    de gtfs_client.py, mientras otra URL en la misma llamada sí lo hace).
+    """
+    def _side_effect(req, timeout=None):
+        for url_fragment, response in url_to_response.items():
+            if url_fragment in req.full_url:
+                return response
+        raise AssertionError(f"URL inesperada en fake_urlopen_dispatch: {req.full_url}")
+
+    return _side_effect

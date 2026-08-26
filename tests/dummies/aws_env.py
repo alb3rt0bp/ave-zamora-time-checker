@@ -55,6 +55,11 @@ os.environ.setdefault(
 )
 os.environ.setdefault("NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES", "-10")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
+# Desactivado por defecto en tests: si no, lambda_handler intentaría
+# descargar el GTFS real de Renfe en cada test que lo ejercite. Los tests
+# que prueban la resolución desde GTFS lo activan explícitamente con
+# @patch("schedule_resolver.GTFS_SCHEDULE_ENABLED", True).
+os.environ.setdefault("GTFS_SCHEDULE_ENABLED", "false")
 
 AWS_REGION = os.environ["AWS_DEFAULT_REGION"]
 DYNAMODB_TABLE_NAME = os.environ["DYNAMODB_STATE_TABLE"]
