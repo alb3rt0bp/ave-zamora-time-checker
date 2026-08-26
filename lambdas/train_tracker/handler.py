@@ -140,6 +140,12 @@ def lambda_handler(event, context):
             # Chamartín), por eso lo delegamos siempre en _process_train.
             train_data = flota_index.get(cod)
             logger.debug(f'Datos en tiempo real de {scheduled_train["cod_comercial"]} ({scheduled_train.get("sentido")}: {train_data}', extra=log_extra)
+            if train_data is not None:
+                logger.info(
+                    "Tren %s detectado en flota: lat=%s, lon=%s, codEstAnt=%s",
+                    cod, train_data.get("lat"), train_data.get("lon"), train_data.get("codEstAnt"),
+                    extra=log_extra,
+                )
             if _process_train(scheduled_train, train_data, now_local, log_extra):
                 processed += 1
     else:
