@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from tests.dummies.handler_test_case import HandlerTestCase
@@ -72,6 +73,32 @@ class TestUpdateState(HandlerTestCase):
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertNotIn("hora_paso_zamora", item)
+
+    def test_gps_position_absent_when_not_given(self):
+        self.handler._update_state("M100", SCHEDULED, 5, NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertNotIn("latitud", item)
+        self.assertNotIn("longitud", item)
+
+    def test_gps_position_persisted_when_given(self):
+        self.handler._update_state(
+            "M100", SCHEDULED, 5, NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447")
+        )
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["latitud"], Decimal("41.5034"))
+        self.assertEqual(item["longitud"], Decimal("-5.7447"))
+
+    def test_gps_position_dropped_by_put_item_when_omitted_on_a_later_call(self):
+        self.handler._update_state(
+            "M100", SCHEDULED, 5, NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447")
+        )
+        self.handler._update_state("M100", SCHEDULED, 8, NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertNotIn("latitud", item)
+        self.assertNotIn("longitud", item)
 
 
 if __name__ == "__main__":

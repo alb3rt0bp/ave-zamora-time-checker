@@ -39,6 +39,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import boto3
 
@@ -142,8 +143,8 @@ def lambda_handler(event, context):
             logger.debug(f'Datos en tiempo real de {scheduled_train["cod_comercial"]} ({scheduled_train.get("sentido")}: {train_data}', extra=log_extra)
             if train_data is not None:
                 logger.info(
-                    "Tren %s detectado en flota: lat=%s, lon=%s, codEstAnt=%s",
-                    cod, train_data.get("lat"), train_data.get("lon"), train_data.get("codEstAnt"),
+                    "Tren %s detectado en flota: %s,%s (pegar en Google Maps), codEstAnt=%s",
+                    cod, train_data.get("latitud"), train_data.get("longitud"), train_data.get("codEstAnt"),
                     extra=log_extra,
                 )
             if _process_train(scheduled_train, train_data, now_local, log_extra):
@@ -275,6 +276,16 @@ def _enrich_with_gtfsrt(cod: str, sentido: str, endpoint_station_code: str, log_
     return fields
 
 
+def _to_decimal(value) -> Decimal | None:
+    """
+    DynamoDB (vía boto3) no admite float nativo, solo Decimal. flotaLD.json
+    entrega latitud/longitud como float tras el parseo JSON, así que hay que
+    convertirlas antes de persistirlas. str(value) evita el ruido de
+    precisión binaria que Decimal(float) arrastraría directamente.
+    """
+    return None if value is None else Decimal(str(value))
+
+
 def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_extra: dict) -> bool:
     """
     Decide si procede marcar el tren como entregado.
@@ -307,6 +318,8 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
     ult_retraso = _sanitize_retraso(
         cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], now_local, log_extra
     )
+    latitud = _to_decimal(live.get("latitud"))
+    longitud = _to_decimal(live.get("longitud"))
 
     # ── ¿Ya pasó por Zamora? ─────────────────────────────────────────────────
     if cod_est_ant == ZAMORA_CODE:
@@ -325,6 +338,8 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
             hora_paso_zamora=hora_llegada_corregida,
             capturado_en_zamora=True,
             ult_retraso=ult_retraso,
+            latitud=latitud,
+            longitud=longitud,
             **gtfsrt_fields,
         )
         _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, now_local, log_extra)
@@ -332,7 +347,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
         return True
 
     # ── Todavía no ha llegado: actualizar estado en DynamoDB ─────────────────
-    _update_state(cod, scheduled, ult_retraso, now_local)
+    _update_state(cod, scheduled, ult_retraso, now_local, latitud=latitud, longitud=longitud)
     logger.info(
         "Tren %s aún no en Zamora (última est: %s, retraso: %d min)",
         cod, cod_est_ant, ult_retraso,
@@ -420,6 +435,8 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
     ult_retraso = _sanitize_retraso(
         cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], now_local, log_extra
     )
+    latitud = _to_decimal(live.get("latitud"))
+    longitud = _to_decimal(live.get("longitud"))
 
     # ── Vía 2: última estación == Chamartín → llegó a Madrid ─────────────────
     if cod_est_ant == CHAMARTIN_CODE:
@@ -439,6 +456,8 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
             hora_llegada_corregida=hora_llegada_corregida,
             capturado_en_zamora=capturado_en_zamora,
             ult_retraso=ult_retraso,
+            latitud=latitud,
+            longitud=longitud,
             **gtfsrt_fields,
         )
         _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, now_local, log_extra)
@@ -470,6 +489,8 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
         cod, scheduled, ult_retraso, now_local,
         capturado_en_zamora=capturado_en_zamora,
         hora_paso_zamora=hora_paso_zamora,
+        latitud=latitud,
+        longitud=longitud,
     )
     logger.info(
         "Tren %s (Madrid) aún en ruta (última est: %s, retraso: %d min)",
@@ -504,7 +525,8 @@ def _end_of_day_ttl(now_local: datetime) -> int:
 
 def _update_state(cod: str, scheduled: dict, retraso: int,
                   now_local: datetime, capturado_en_zamora: bool = False,
-                  hora_paso_zamora: str | None = None):
+                  hora_paso_zamora: str | None = None,
+                  latitud: str | None = None, longitud: str | None = None):
     """Persiste el estado transitorio del tren en DynamoDB."""
     ttl = _end_of_day_ttl(now_local)  # expira a las 23:59:59 del mismo día
 
@@ -527,9 +549,14 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
         "ttl":         ttl,
     }
     # put_item reemplaza el item entero: si no se pasa (p. ej. aún no
-    # capturado), se omite el atributo en vez de fabricar un valor.
+    # capturado, o Renfe no informó posición en este ciclo), se omite el
+    # atributo en vez de fabricar un valor.
     if hora_paso_zamora is not None:
         item["hora_paso_zamora"] = hora_paso_zamora
+    if latitud is not None:
+        item["latitud"] = latitud
+    if longitud is not None:
+        item["longitud"] = longitud
 
     state_table.put_item(Item=item)
 
@@ -537,7 +564,8 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
 def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None = None,
                capturado_en_zamora: bool | None = None, ult_retraso: int | None = None,
                hora_paso_zamora: str | None = None, minutos_retraso_gtfsrt: int | None = None,
-               hora_llegada_gtfsrt: str | None = None, hora_paso_zamora_gtfsrt: str | None = None):
+               hora_llegada_gtfsrt: str | None = None, hora_paso_zamora_gtfsrt: str | None = None,
+               latitud: str | None = None, longitud: str | None = None):
     """Marca el tren como entregado (procesado) para hoy."""
     # "ttl" es palabra reservada en DynamoDB → hay que usar un alias (#ttl).
     # Se fija siempre aquí, ya que este item puede no haber pasado nunca por
@@ -577,6 +605,14 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None
     if hora_paso_zamora_gtfsrt is not None:
         set_parts.append("hora_paso_zamora_gtfsrt = :hora_paso_zamora_gtfsrt")
         values[":hora_paso_zamora_gtfsrt"] = hora_paso_zamora_gtfsrt
+
+    if latitud is not None:
+        set_parts.append("latitud = :latitud")
+        values[":latitud"] = latitud
+
+    if longitud is not None:
+        set_parts.append("longitud = :longitud")
+        values[":longitud"] = longitud
 
     state_table.update_item(
         Key={"pk": f"{cod}#{now_local.date().isoformat()}"},

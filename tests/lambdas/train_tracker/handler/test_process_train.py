@@ -57,6 +57,8 @@ class TestProcessTrain(HandlerTestCase):
         self.assertEqual(item["ult_retraso"], TRAIN_G100_EN_RUTA["ultRetraso"])
         self.assertFalse(item["entregado"])
         self.assertNotIn("cod_est_ant", item)
+        self.assertEqual(float(item["latitud"]), TRAIN_G100_EN_RUTA["latitud"])
+        self.assertEqual(float(item["longitud"]), TRAIN_G100_EN_RUTA["longitud"])
 
     def test_galicia_arrival_at_zamora_marks_entregado(self):
         result = self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, NOW, SAMPLE_LOG_EXTRA)
@@ -69,6 +71,8 @@ class TestProcessTrain(HandlerTestCase):
         # hora_llegada_corregida: es el mismo evento (paso por Zamora).
         self.assertEqual(item["hora_paso_zamora"], item["hora_llegada_corregida"])
         self.assertEqual(item["hora_paso_zamora"], "09:34")
+        self.assertEqual(float(item["latitud"]), TRAIN_G100_EN_ZAMORA["latitud"])
+        self.assertEqual(float(item["longitud"]), TRAIN_G100_EN_ZAMORA["longitud"])
         # El polling ya no escribe a S3: eso lo hace daily_dump_handler.
         objects = self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET)
         self.assertNotIn("Contents", objects)

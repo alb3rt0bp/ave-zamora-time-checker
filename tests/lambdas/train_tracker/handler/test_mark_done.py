@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from tests.dummies.handler_test_case import HandlerTestCase
@@ -160,6 +161,29 @@ class TestMarkDone(HandlerTestCase):
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_paso_zamora_gtfsrt"], "07:05")
+
+    def test_sets_gps_position_when_given(self):
+        self.handler._mark_done("M100", NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447"))
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["latitud"], Decimal("41.5034"))
+        self.assertEqual(item["longitud"], Decimal("-5.7447"))
+
+    def test_does_not_touch_gps_position_when_not_given(self):
+        # update_item es un update parcial: la vía de desaparición (live=None,
+        # sin datos GPS de este ciclo) no debe borrar la última posición
+        # conocida del tren.
+        self.table.update_item(
+            Key={"pk": f"M100#{NOW.date().isoformat()}"},
+            UpdateExpression="SET latitud = :lat, longitud = :lon",
+            ExpressionAttributeValues={":lat": Decimal("41.5034"), ":lon": Decimal("-5.7447")},
+        )
+
+        self.handler._mark_done("M100", NOW)
+
+        item = self.get_item("M100", NOW.date().isoformat())
+        self.assertEqual(item["latitud"], Decimal("41.5034"))
+        self.assertEqual(item["longitud"], Decimal("-5.7447"))
 
 
 if __name__ == "__main__":

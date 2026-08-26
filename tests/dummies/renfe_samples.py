@@ -7,8 +7,8 @@ TRAIN_M100_EN_RUTA = {
     "codEstAnt": "10000",
     "codEstSig": "20000",
     "ultRetraso": 0,
-    "lat": 41.5,
-    "lon": -5.7,
+    "latitud": 41.5,
+    "longitud": -5.7,
 }
 
 # Tren M100 acaba de pasar por Zamora.
@@ -18,8 +18,8 @@ TRAIN_M100_EN_ZAMORA = {
     "codEstAnt": "30200",  # ZAMORA_CODE
     "codEstSig": "40000",
     "ultRetraso": 3,
-    "lat": 41.5034,
-    "lon": -5.7447,
+    "latitud": 41.5034,
+    "longitud": -5.7447,
 }
 
 # Tren M100 acaba de llegar a Chamartín.
@@ -29,8 +29,8 @@ TRAIN_M100_EN_CHAMARTIN = {
     "codEstAnt": "17000",  # CHAMARTIN_CODE
     "codEstSig": "",
     "ultRetraso": 5,
-    "lat": 40.472,
-    "lon": -3.682,
+    "latitud": 40.472,
+    "longitud": -3.682,
 }
 
 # Tren G100 aún no ha pasado por Zamora.
@@ -40,8 +40,8 @@ TRAIN_G100_EN_RUTA = {
     "codEstAnt": "10000",
     "codEstSig": "30200",
     "ultRetraso": 2,
-    "lat": 41.4,
-    "lon": -5.6,
+    "latitud": 41.4,
+    "longitud": -5.6,
 }
 
 # Tren G100 acaba de pasar por Zamora.
@@ -51,8 +51,8 @@ TRAIN_G100_EN_ZAMORA = {
     "codEstAnt": "30200",  # ZAMORA_CODE
     "codEstSig": "40000",
     "ultRetraso": 4,
-    "lat": 41.5034,
-    "lon": -5.7447,
+    "latitud": 41.5034,
+    "longitud": -5.7447,
 }
 
 # Tren G100 acaba de pasar por Zamora con un retraso importante (> 15 min),

@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from tests.dummies.handler_test_case import HandlerTestCase
@@ -108,6 +109,21 @@ class TestProcessMadridTrain(HandlerTestCase):
         item = self.get_item("M100", _at(8, 41).date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")
 
+    def test_via1_preserves_last_known_gps_position(self):
+        # Igual que hora_paso_zamora: la vía de desaparición (live=None) no
+        # tiene datos GPS de este ciclo, así que _mark_done no debe tocar
+        # latitud/longitud y la última posición conocida debe sobrevivir.
+        self._put_state(
+            _at(8, 41), capturado_en_zamora=True, ult_retraso=10,
+            latitud=Decimal("41.5034"), longitud=Decimal("-5.7447"),
+        )
+
+        self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 41), SAMPLE_LOG_EXTRA)
+
+        item = self.get_item("M100", _at(8, 41).date().isoformat())
+        self.assertEqual(item["latitud"], Decimal("41.5034"))
+        self.assertEqual(item["longitud"], Decimal("-5.7447"))
+
     def test_via2_chamartin_marks_entregado_regardless_of_zamora_flag(self):
         result = self.handler._process_madrid_train(
             MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN, _at(8, 35), SAMPLE_LOG_EXTRA
@@ -118,6 +134,8 @@ class TestProcessMadridTrain(HandlerTestCase):
         self.assertTrue(item["entregado"])
         # No había pasado antes por Zamora (no hay estado previo) → se refleja False.
         self.assertFalse(item.get("capturado_en_zamora", False))
+        self.assertEqual(float(item["latitud"]), TRAIN_M100_EN_CHAMARTIN["latitud"])
+        self.assertEqual(float(item["longitud"]), TRAIN_M100_EN_CHAMARTIN["longitud"])
         # TRAIN_M100_EN_CHAMARTIN trae ultRetraso=5, por debajo del umbral (15).
         self.assertEqual(self.get_published_delay_alerts(), [])
 
@@ -193,6 +211,8 @@ class TestProcessMadridTrain(HandlerTestCase):
         self.assertFalse(item["entregado"])
         self.assertEqual(item["ult_retraso"], TRAIN_M100_EN_RUTA["ultRetraso"])
         self.assertNotIn("cod_est_ant", item)
+        self.assertEqual(float(item["latitud"]), TRAIN_M100_EN_RUTA["latitud"])
+        self.assertEqual(float(item["longitud"]), TRAIN_M100_EN_RUTA["longitud"])
 
     def test_en_route_sets_capturado_en_zamora_when_passing_through_zamora(self):
         result = self.handler._process_madrid_train(
