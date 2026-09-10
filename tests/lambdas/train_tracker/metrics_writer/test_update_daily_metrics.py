@@ -122,6 +122,42 @@ class TestUpdateDailyMetrics(HandlerTestCase):
         self.assertEqual(month["total_viajes"], 2)
         self.assertEqual(month["suma_retraso_significativo_minutos"], 50)
 
+    def test_train_item_accumulates_the_delay_histogram(self):
+        self._writer().update_daily_metrics(
+            [_record("04154", "Madrid", 20), _record("04475", "Galicia", 3)], MONDAY, NOW_LOCAL
+        )
+        self._writer().update_daily_metrics(
+            [_record("04154", "Madrid", 20), _record("04154", "Madrid", -2)], TUESDAY, NOW_LOCAL
+        )
+
+        train = self.get_metrics_item("TRAIN#04154")
+        self.assertEqual(train["histograma_retraso"], {"20": 2, "-2": 1})
+
+        otro = self.get_metrics_item("TRAIN#04475")
+        self.assertEqual(otro["histograma_retraso"], {"3": 1})
+
+    def test_histogram_is_not_double_counted_on_retry(self):
+        records = [_record("04154", "Madrid", 20)]
+        writer = self._writer()
+
+        writer.update_daily_metrics(records, MONDAY, NOW_LOCAL)
+        writer.update_daily_metrics(records, MONDAY, NOW_LOCAL)  # reintento del mismo día
+
+        self.assertEqual(self.get_metrics_item("TRAIN#04154")["histograma_retraso"], {"20": 1})
+
+    def test_histogram_excludes_cancelled_trains(self):
+        # Un tren que no circuló no puede contar como "llegó puntual": los
+        # cancelados llegan con minutos_retraso None y se filtran antes.
+        records = [
+            _record("04154", "Madrid", 20),
+            _record("04475", "Galicia", None, cancelado=True),
+        ]
+
+        self._writer().update_daily_metrics(records, MONDAY, NOW_LOCAL)
+
+        self.assertEqual(self.get_metrics_item("TRAIN#04154")["histograma_retraso"], {"20": 1})
+        self.assertIsNone(self.get_metrics_item("TRAIN#04475"))
+
     def test_retry_same_target_date_does_not_double_count(self):
         records = [_record("04154", "Madrid", 20)]
         writer = self._writer()

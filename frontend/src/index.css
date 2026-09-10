@@ -565,6 +565,24 @@ input {
   transform: scale(0.95);
 }
 
+/* Misma píldora gris que el resto de datos de la fila, pero con el texto en
+   color de acento: el gris la mantiene calmada (aparece en casi todas las
+   filas de cualquier día) y el azul es lo que la lee como enlace y la separa
+   de la píldora de la columna Sentido, que va en gris. El relleno azul con
+   chincheta queda reservado al chip de posición en vivo, que solo existe hoy
+   y solo para trenes en circulación. */
+.train-chip--detalle {
+  background: rgb(120 120 128 / 12%);
+  color: var(--accent);
+  /* Sin negrita, al contrario que el chip de posición en vivo: es lo que deja
+     que ese destaque como el dato excepcional de la columna. */
+  font-weight: 400;
+}
+
+.train-chip--detalle:hover {
+  background: rgb(120 120 128 / 22%);
+}
+
 .sentido-badge {
   display: inline-block;
   font-size: 12px;
@@ -769,6 +787,78 @@ input {
   transform: scale(0.96);
 }
 
+/* Estimación de llegada (modal de tren): el dato que el usuario viene a
+   buscar, así que abre el panel por encima del gráfico de tramos, que pasa
+   a ser la evidencia que lo respalda. Panel embutido sobre la hoja de
+   cristal: solo un tinte del propio texto, sin material nuevo, para no
+   apilar dos superficies translúcidas. */
+.arrival-estimate {
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-hairline);
+  background: color-mix(in srgb, var(--text-primary) 4%, transparent);
+}
+
+.arrival-estimate__label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.arrival-estimate__headline {
+  margin: 2px 0 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.arrival-estimate__time {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* El retraso estimado va en gris secundario, no en la rampa de color de
+   severidad: el gráfico de tramos justo debajo ya codifica la gravedad por
+   color (y con leyenda), y los tokens --status-* saturados sobre fondo
+   claro no llegan al contraste AA a este tamaño de texto. */
+.arrival-estimate__delta {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.arrival-estimate__spread {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.arrival-estimate__basis {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mismo retraso estimado, repetido junto a la hora programada de llegada
+   de la cabecera para que la cifra esté donde el usuario mira la hora. */
+.modal-subtitle__delta {
+  margin-left: 5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
 /* Resumen de estadísticas (modal de tren, vista semanal/mensual, global):
    pares etiqueta/valor tipo "grouped list", reutilizado en las 3 vistas. */
 .train-stats {
@@ -904,6 +994,12 @@ input {
   animation: fade-in 0.2s ease;
 }
 
+/* Única superficie del sistema que renuncia al material translúcido: la hoja
+   modal se apila sobre contenido denso (la tabla de trenes, el mapa) y a la
+   opacidad de .glass las filas de detrás se leían a través de las cifras del
+   detalle. Fondo sólido y sin backdrop-filter, que además no aportaba nada
+   aquí (no hay nada que transparentar) y encarecía el repintado de un
+   contenedor con scroll. El foco lo sigue dando el velo de .modal-backdrop. */
 .modal-sheet {
   width: 100%;
   max-width: 640px;
@@ -911,6 +1007,9 @@ input {
   overflow: auto;
   border-radius: 24px 24px 0 0;
   padding: 12px 20px 20px;
+  background: var(--bg-surface-solid);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   animation: slide-up 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 

@@ -141,6 +141,45 @@ dato corrupto. Cada corrección publica además un aviso por email a
 `AlertEmailAddress` (vía el topic SNS `AlertTopic`, el mismo que usa la alarma de
 retrasos altos) para poder revisarla manualmente.
 
+### Estimación de la hora probable de llegada
+
+La pantalla de detalle de cada tren muestra una hora probable de llegada
+(hora programada + retraso estimado), el rango habitual y el caso
+excepcional. Todo sale de `histograma_retraso`, un mapa
+`{minutos_retraso → nº de viajes}` que `metrics_writer` acumula en cada item
+`TRAIN#` con un `+1` por viaje: es un estadístico suficiente para cualquier
+percentil, así que no hace falta ni guardar los minutos crudos ni releer S3.
+La API deriva mediana y percentiles en cada lectura
+(`_project_delay_estimate`).
+
+Las decisiones están validadas contra los 42 días / 825 viajes que había en
+el Data Lake el 2026-09-09, no supuestas:
+
+- **La distribución es unimodal con cola larga a la derecha** (pico en 0-1
+  min, mediana 6, media 8,9, P90 21, máximo 149). Un 8% de los viajes llegan
+  adelantados, así que los minutos negativos se guardan y se muestran tal
+  cual en vez de truncarse a 0.
+- **El estimador es la mediana**, elegida por un backtest leave-one-out:
+  6,74 min de error absoluto medio y 83,5% de aciertos a ±10 min, por
+  delante de la media (7,07), la media truncada al 20% (6,75) y la moda
+  suavizada (7,12). La ponderación por recencia, condicionar por día de la
+  semana y el shrinkage hacia la distribución global se probaron y quedan
+  dentro del ruido (o peor: condicionar por día de la semana da 7,34,
+  sobreajusta con ~6 viajes por tren y día). A revisar con un año de datos.
+- **El rango no es decorativo**: con 6,7 min de error medio sobre una
+  mediana de 6, publicar solo el número sugeriría una precisión que no
+  existe. Los percentiles empíricos están bien calibrados fuera de muestra
+  (P25-P75 cubre el 55,9% frente al 50% nominal; P10-P90 el 79,9% frente al
+  80%).
+- **`DelayEstimateMinSample` (por defecto 8)**: por debajo de ~8 viajes la
+  mediana del propio tren deja de batir a la de su sentido, así que hereda
+  la del sentido y la pantalla lo dice explícitamente.
+- **Solo se estima la llegada.** `minutos_retraso` se mide en el extremo que
+  el sistema sigue de cada sentido, que coincide con `hora_llegada_destino`
+  en ambos. El retraso en la salida es otra variable: para los trenes a
+  Madrid es menor (mediana 6 min en Zamora frente a 9 en Chamartín) y para
+  los de Galicia ocurre en Chamartín, que este sistema no observa.
+
 ### Redacción automática de tuits (tweet-notifier)
 
 Cuando `train-tracker` marca un tren como entregado con más de
@@ -214,6 +253,8 @@ ave-zamora-time-checker/
 │   └── vite.config.ts                 # Config de Vite + Vitest (tests y cobertura)
 ├── scripts/
 │   ├── compile_schedules.py           # CSVs → config/train_schedules.json
+│   ├── backfill_metrics.py            # Reprocesa el histórico de S3 contra MetricsWriter
+│   ├── backfill_delay_histograms.py   # Siembra histograma_retraso en los items TRAIN#
 │   └── query_examples.sql             # Queries Athena de ejemplo
 └── .github/workflows/
     └── deploy.yml                     # CI/CD: deploy automático del backend a AWS

@@ -29,6 +29,15 @@ const METRICS: TrainMetrics = {
   suma_retraso_significativo_minutos: 95,
   rank_retraso: 1,
   total_trenes_comparados: 22,
+  // Muestra equivalente: mediana +7, habitual entre +1 y +14, P90 +25.
+  estimacion_retraso: {
+    mediana_minutos: 7,
+    p25_minutos: 1,
+    p75_minutos: 14,
+    p90_minutos: 25,
+    viajes_estimacion: 36,
+    base: "tren",
+  },
 };
 
 describe("TrainStatsModal", () => {
@@ -47,7 +56,8 @@ describe("TrainStatsModal", () => {
     expect(screen.getByRole("dialog", { name: /04154/ })).toBeInTheDocument();
     expect(screen.getByText(/95 min/)).toBeInTheDocument();
     expect(screen.getByText("30%")).toBeInTheDocument();
-    expect(screen.getByText(/desde 31 de julio de 2026/)).toBeInTheDocument();
+    // Dos veces: la base de la estimación de llegada y los retrasos acumulados.
+    expect(screen.getAllByText(/desde 31 de julio de 2026/)).toHaveLength(2);
   });
 
   it("shows the scheduled departure and arrival times next to the title", () => {
@@ -63,7 +73,122 @@ describe("TrainStatsModal", () => {
     );
 
     expect(screen.getByText("Salida 06:56")).toBeInTheDocument();
-    expect(screen.getByText("Llegada 08:56")).toBeInTheDocument();
+    expect(screen.getByText(/Llegada 08:56/)).toBeInTheDocument();
+  });
+
+  it("shows the probable arrival time, its habitual range and the exceptional case", () => {
+    render(
+      <TrainStatsModal
+        codComercial="04154"
+        schedule={SCHEDULE}
+        metrics={METRICS}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Llegada programada 08:56 + mediana 7 min.
+    expect(screen.getByText("09:03")).toBeInTheDocument();
+    // P25 +1 y P75 +14 sobre la misma hora programada.
+    expect(screen.getByText(/entre las 08:57 y las 09:10/)).toBeInTheDocument();
+    // P90 +25.
+    expect(screen.getByText(/más tarde de las 09:21/)).toBeInTheDocument();
+    expect(screen.getByText(/36 viajes de este tren/)).toBeInTheDocument();
+  });
+
+  it("repeats the estimated delay next to the scheduled arrival", () => {
+    render(
+      <TrainStatsModal
+        codComercial="04154"
+        schedule={SCHEDULE}
+        metrics={METRICS}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={vi.fn()}
+      />,
+    );
+
+    // Una vez en la cabecera, otra junto a la hora probable.
+    expect(screen.getAllByText("+7 min")).toHaveLength(2);
+  });
+
+  it("says the estimate belongs to the sentido when the train has too few trips", () => {
+    render(
+      <TrainStatsModal
+        codComercial="04505"
+        schedule={SCHEDULE}
+        metrics={{
+          ...METRICS,
+          estimacion_retraso: { ...METRICS.estimacion_retraso!, base: "sentido", viajes_estimacion: 395 },
+        }}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/no tiene viajes suficientes/)).toBeInTheDocument();
+    expect(screen.getByText(/395 viajes registrados en sentido/)).toBeInTheDocument();
+  });
+
+  it("omits the arrival estimate when there is no data to base it on", () => {
+    render(
+      <TrainStatsModal
+        codComercial="04154"
+        schedule={SCHEDULE}
+        metrics={{ ...METRICS, estimacion_retraso: null }}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/Llegada probable/)).not.toBeInTheDocument();
+    // El resto del panel sigue en pie.
+    expect(screen.getByText("30%")).toBeInTheDocument();
+  });
+
+  it("omits the arrival estimate when the schedule is unknown, since there is no time to add it to", () => {
+    render(
+      <TrainStatsModal
+        codComercial="04154"
+        schedule={undefined}
+        metrics={METRICS}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText(/Llegada probable/)).not.toBeInTheDocument();
+  });
+
+  it("shows a punctual train's estimate without a fake positive delay", () => {
+    render(
+      <TrainStatsModal
+        codComercial="04114"
+        schedule={SCHEDULE}
+        metrics={{
+          ...METRICS,
+          estimacion_retraso: {
+            mediana_minutos: 0,
+            p25_minutos: -2,
+            p75_minutos: 3,
+            p90_minutos: 7,
+            viajes_estimacion: 41,
+            base: "tren",
+          },
+        }}
+        firstAggregatedDate="2026-07-31"
+        thresholdMinutes={15}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getAllByText("Puntual")).toHaveLength(2);
+    // P25 negativo: la llegada habitual empieza ANTES de la hora programada.
+    expect(screen.getByText(/entre las 08:54 y las 08:59/)).toBeInTheDocument();
   });
 
   it("omits the schedule line when the train's schedule is unknown", () => {

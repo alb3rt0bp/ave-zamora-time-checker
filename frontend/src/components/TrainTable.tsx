@@ -1,13 +1,29 @@
 import { useState } from "react";
-import type { RenfeTren, TrainRow, TrainSchedule } from "../types";
+import type { GlobalMetrics, RenfeTren, TrainMetrics, TrainRow, TrainSchedule } from "../types";
 import { CLAIM_THRESHOLD_MIN, delayStatus, formatDelay } from "../utils/trainFormat";
 import { MapPinIcon } from "./icons";
 import { TrainMapModal } from "./TrainMapModal";
+import { TrainStatsModal } from "./TrainStatsModal";
 
 interface TrainTableProps {
   rows: TrainRow[];
+  // Solo la vista de hoy pasa flota: la posición en vivo de un tren con ese
+  // mismo codComercial no dice nada del viaje de un día pasado, así que en
+  // los días volcados el código de tren abre siempre el detalle estadístico.
   flota?: Map<string, RenfeTren>;
   schedule?: Map<string, TrainSchedule>;
+  metrics?: Map<string, TrainMetrics>;
+  globalMetrics?: GlobalMetrics | null;
+}
+
+// Qué abre el código de tren de cada fila: el mapa en vivo cuando hay
+// posición real (solo hoy), y si no el detalle del tren. La modalidad se fija
+// al pulsar y no se recalcula: si el tren desaparece de flotaLD.json en el
+// siguiente sondeo de 15s, el mapa ya abierto no debe convertirse en otra
+// modal bajo el dedo del usuario.
+interface OpenModal {
+  codComercial: string;
+  kind: "mapa" | "detalle";
 }
 
 const POSSIBLE_CLAIM_THRESHOLD_MIN = 60;
@@ -19,15 +35,21 @@ function openInNewTab(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-export function TrainTable({ rows, flota = new Map(), schedule = new Map() }: TrainTableProps) {
-  const [openTrainCode, setOpenTrainCode] = useState<string | null>(null);
+export function TrainTable({
+  rows,
+  flota = new Map(),
+  schedule = new Map(),
+  metrics = new Map(),
+  globalMetrics = null,
+}: TrainTableProps) {
+  const [openModal, setOpenModal] = useState<OpenModal | null>(null);
 
   if (rows.length === 0) {
     return <p className="state-card">No hay trenes para mostrar.</p>;
   }
 
   const sortedRows = [...rows].sort((a, b) => a.horaProgramada.localeCompare(b.horaProgramada));
-  const openRow = openTrainCode ? sortedRows.find((row) => row.codComercial === openTrainCode) : undefined;
+  const openRow = openModal ? sortedRows.find((row) => row.codComercial === openModal.codComercial) : undefined;
 
   return (
     <>
@@ -54,22 +76,29 @@ export function TrainTable({ rows, flota = new Map(), schedule = new Map() }: Tr
                 const showClaim = !row.cancelado && row.retrasoMinutos !== null && row.retrasoMinutos > CLAIM_THRESHOLD_MIN;
                 const showPossibleClaim = showClaim && (row.retrasoMinutos as number) > POSSIBLE_CLAIM_THRESHOLD_MIN;
                 const horaSalida = schedule.get(row.codComercial)?.hora_salida ?? null;
+                const enVivo = flota.has(row.codComercial);
 
                 return (
                   <tr key={row.codComercial}>
                     <td>
-                      {flota.has(row.codComercial) ? (
-                        <button
-                          type="button"
-                          className="train-chip"
-                          onClick={() => setOpenTrainCode(row.codComercial)}
-                        >
-                          <MapPinIcon />
-                          {row.codComercial}
-                        </button>
-                      ) : (
-                        <span className="cell-primary">{row.codComercial}</span>
-                      )}
+                      <button
+                        type="button"
+                        className={enVivo ? "train-chip" : "train-chip train-chip--detalle"}
+                        title={
+                          enVivo
+                            ? `Ver la posición en vivo del tren ${row.codComercial}`
+                            : `Ver el detalle del tren ${row.codComercial}`
+                        }
+                        onClick={() =>
+                          setOpenModal({
+                            codComercial: row.codComercial,
+                            kind: enVivo ? "mapa" : "detalle",
+                          })
+                        }
+                      >
+                        {enVivo && <MapPinIcon />}
+                        {row.codComercial}
+                      </button>
                     </td>
                     <td>
                       <span className="sentido-badge">{row.sentido}</span>
@@ -118,7 +147,7 @@ export function TrainTable({ rows, flota = new Map(), schedule = new Map() }: Tr
           </table>
         </div>
       </div>
-      {openRow && (
+      {openModal?.kind === "mapa" && openRow && (
         <TrainMapModal
           codComercial={openRow.codComercial}
           sentido={openRow.sentido}
@@ -127,7 +156,17 @@ export function TrainTable({ rows, flota = new Map(), schedule = new Map() }: Tr
           retrasoMinutos={openRow.retrasoMinutos}
           cancelado={openRow.cancelado}
           flota={flota}
-          onClose={() => setOpenTrainCode(null)}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal?.kind === "detalle" && (
+        <TrainStatsModal
+          codComercial={openModal.codComercial}
+          schedule={schedule.get(openModal.codComercial)}
+          metrics={metrics.get(openModal.codComercial)}
+          firstAggregatedDate={globalMetrics?.first_aggregated_date}
+          thresholdMinutes={globalMetrics?.significant_delay_threshold_minutes}
+          onClose={() => setOpenModal(null)}
         />
       )}
     </>

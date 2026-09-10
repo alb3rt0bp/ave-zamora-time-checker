@@ -30,6 +30,7 @@ const TRAIN_METRICS = [
     suma_retraso_significativo_minutos: 95,
     rank_retraso: 1,
     total_trenes_comparados: 2,
+    estimacion_retraso: null,
   },
 ];
 

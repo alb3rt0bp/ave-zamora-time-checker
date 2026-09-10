@@ -1,6 +1,8 @@
 import { useEffect } from "react";
-import type { TrainMetrics, TrainSchedule } from "../types";
+import type { DelayEstimate, TrainMetrics, TrainSchedule } from "../types";
+import { addMinutesToTime } from "../utils/delayEstimate";
 import { formatSpanishDate } from "../utils/metricsFormat";
+import { formatDelay } from "../utils/trainFormat";
 import { DonutChart } from "./DonutChart";
 
 interface TrainStatsModalProps {
@@ -10,6 +12,60 @@ interface TrainStatsModalProps {
   firstAggregatedDate: string | undefined;
   thresholdMinutes: number | undefined;
   onClose: () => void;
+}
+
+interface ArrivalEstimateProps {
+  estimate: DelayEstimate;
+  horaLlegadaDestino: string;
+  sentido: string;
+  firstAggregatedDate: string | undefined;
+}
+
+// La estimación se aplica SIEMPRE a la hora de llegada, nunca a la de
+// salida: minutos_retraso se mide en el extremo que este sistema sigue de
+// cada sentido (Chamartín para Madrid, Zamora para Galicia), que es
+// justamente hora_llegada_destino. El retraso en la salida es otra variable
+// distinta (para los trenes a Madrid, menor: acumulan minutos después de
+// pasar por Zamora) y no se estima aquí.
+function ArrivalEstimate({
+  estimate,
+  horaLlegadaDestino,
+  sentido,
+  firstAggregatedDate,
+}: ArrivalEstimateProps) {
+  const probable = addMinutesToTime(horaLlegadaDestino, estimate.mediana_minutos);
+  const habitualDesde = addMinutesToTime(horaLlegadaDestino, estimate.p25_minutos);
+  const habitualHasta = addMinutesToTime(horaLlegadaDestino, estimate.p75_minutos);
+  const excepcional = addMinutesToTime(horaLlegadaDestino, estimate.p90_minutos);
+
+  return (
+    <section className="arrival-estimate">
+      <h3 className="arrival-estimate__label">Llegada probable</h3>
+      <p className="arrival-estimate__headline">
+        <span className="arrival-estimate__time">{probable}</span>
+        <span className="arrival-estimate__delta">{formatDelay(estimate.mediana_minutos)}</span>
+      </p>
+      <p className="arrival-estimate__spread">
+        La mitad de los viajes llegan entre las {habitualDesde} y las {habitualHasta}.
+        {" "}
+        Uno de cada diez llega más tarde de las {excepcional}.
+      </p>
+      <p className="arrival-estimate__basis">
+        {estimate.base === "tren" ? (
+          <>
+            Sobre {estimate.viajes_estimacion} viajes de este tren
+            {firstAggregatedDate ? ` desde ${formatSpanishDate(firstAggregatedDate)}` : ""}.
+          </>
+        ) : (
+          <>
+            Este tren todavía no tiene viajes suficientes para una estimación propia: se
+            muestra la de los {estimate.viajes_estimacion} viajes registrados en sentido{" "}
+            {sentido}.
+          </>
+        )}
+      </p>
+    </section>
+  );
 }
 
 // Mismo patrón de interacción que TrainMapModal (backdrop/sheet/grabber/
@@ -30,6 +86,8 @@ export function TrainStatsModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
+  const estimate = metrics?.estimacion_retraso ?? null;
+
   return (
     <div
       role="dialog"
@@ -46,7 +104,14 @@ export function TrainStatsModal({
             {schedule && (
               <p className="modal-subtitle">
                 <span className="modal-subtitle__item">Salida {schedule.hora_salida}</span>
-                <span className="modal-subtitle__item">Llegada {schedule.hora_llegada_destino}</span>
+                <span className="modal-subtitle__item">
+                  Llegada {schedule.hora_llegada_destino}
+                  {estimate && (
+                    <span className="modal-subtitle__delta">
+                      {formatDelay(estimate.mediana_minutos)}
+                    </span>
+                  )}
+                </span>
               </p>
             )}
           </div>
@@ -57,6 +122,14 @@ export function TrainStatsModal({
 
         {metrics ? (
           <div className="train-stats">
+            {estimate && schedule && (
+              <ArrivalEstimate
+                estimate={estimate}
+                horaLlegadaDestino={schedule.hora_llegada_destino}
+                sentido={metrics.sentido}
+                firstAggregatedDate={firstAggregatedDate}
+              />
+            )}
             <DonutChart buckets={metrics} thresholdMinutes={thresholdMinutes} />
             <dl className="stats-summary">
               <div className="stats-row">

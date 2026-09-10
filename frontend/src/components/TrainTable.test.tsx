@@ -1,11 +1,35 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { TrainTable } from "./TrainTable";
-import type { RenfeTren, TrainRow, TrainSchedule } from "../types";
+import type { GlobalMetrics, RenfeTren, TrainMetrics, TrainRow, TrainSchedule } from "../types";
 
 vi.mock("./TrainMapModal", () => ({
   TrainMapModal: ({ codComercial, onClose }: { codComercial: string; onClose: () => void }) => (
     <div role="dialog" aria-label={`mapa de ${codComercial}`}>
+      <button type="button" onClick={onClose}>
+        Cerrar
+      </button>
+    </div>
+  ),
+}));
+
+vi.mock("./TrainStatsModal", () => ({
+  TrainStatsModal: ({
+    codComercial,
+    metrics,
+    firstAggregatedDate,
+    thresholdMinutes,
+    onClose,
+  }: {
+    codComercial: string;
+    metrics: TrainMetrics | undefined;
+    firstAggregatedDate: string | undefined;
+    thresholdMinutes: number | undefined;
+    onClose: () => void;
+  }) => (
+    <div role="dialog" aria-label={`detalle de ${codComercial}`}>
+      <p>{`viajes: ${metrics?.total_viajes ?? "sin métricas"}`}</p>
+      <p>{`desde: ${firstAggregatedDate ?? "-"} / umbral: ${thresholdMinutes ?? "-"}`}</p>
       <button type="button" onClick={onClose}>
         Cerrar
       </button>
@@ -212,19 +236,10 @@ describe("TrainTable", () => {
       ["04154", { codComercial: "04154", latitud: 41.5, longitud: -5.74 }],
     ]);
 
-    it("renders the train code as plain text when there is no live position for it", () => {
-      render(<TrainTable rows={rows} flota={new Map()} />);
-
-      expect(screen.getByText("04154")).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "04154" })).not.toBeInTheDocument();
-    });
-
     it("renders the train code as a clickable link when a live position is available", () => {
       render(<TrainTable rows={rows} flota={flotaWith04154} />);
 
       expect(screen.getByRole("button", { name: "04154" })).toBeInTheDocument();
-      // El otro tren de la tabla no tiene posición en vivo: sigue en texto plano.
-      expect(screen.queryByRole("button", { name: "04200" })).not.toBeInTheDocument();
     });
 
     it("opens the map modal for the clicked train", () => {
@@ -248,6 +263,98 @@ describe("TrainTable", () => {
       render(<TrainTable rows={rows} flota={flotaWith04154} />);
 
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    // La posición en vivo solo la pasa la vista de hoy: en un día ya volcado
+    // el mismo tren circulando ahora no es el viaje que se está consultando.
+    it("does not link to the map when the view provides no live positions", () => {
+      render(<TrainTable rows={rows} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "04154" }));
+
+      expect(screen.queryByRole("dialog", { name: "mapa de 04154" })).not.toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: "detalle de 04154" })).toBeInTheDocument();
+    });
+  });
+
+  describe("train detail modal", () => {
+    const flotaWith04154: Map<string, RenfeTren> = new Map([
+      ["04154", { codComercial: "04154", latitud: 41.5, longitud: -5.74 }],
+    ]);
+
+    const metrics: Map<string, TrainMetrics> = new Map([
+      [
+        "04154",
+        {
+          cod_comercial: "04154",
+          sentido: "Madrid",
+          rank_retraso: 3,
+          total_trenes_comparados: 54,
+          estimacion_retraso: null,
+          total_viajes: 42,
+          viajes_bucket_puntual: 20,
+          viajes_bucket_leve: 12,
+          viajes_bucket_significativo: 7,
+          viajes_bucket_grave: 3,
+          pct_bucket_puntual: 47.6,
+          pct_bucket_leve: 28.6,
+          pct_bucket_significativo: 16.7,
+          pct_bucket_grave: 7.1,
+          viajes_retraso_significativo: 10,
+          pct_retraso_significativo: 23.8,
+          suma_retraso_significativo_minutos: 214,
+        },
+      ],
+    ]);
+
+    const globalMetrics = {
+      first_aggregated_date: "2026-07-30",
+      significant_delay_threshold_minutes: 15,
+    } as GlobalMetrics;
+
+    it("opens the detail modal for a train without live position", () => {
+      render(<TrainTable rows={rows} flota={flotaWith04154} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "04200" }));
+
+      expect(screen.getByRole("dialog", { name: "detalle de 04200" })).toBeInTheDocument();
+    });
+
+    it("passes the train's metrics and the global context to the modal", () => {
+      render(<TrainTable rows={rows} metrics={metrics} globalMetrics={globalMetrics} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "04154" }));
+
+      expect(screen.getByText("viajes: 42")).toBeInTheDocument();
+      expect(screen.getByText("desde: 2026-07-30 / umbral: 15")).toBeInTheDocument();
+    });
+
+    it("still opens the modal for a train with no metrics aggregated yet", () => {
+      render(<TrainTable rows={rows} metrics={metrics} globalMetrics={globalMetrics} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "04200" }));
+
+      expect(screen.getByText("viajes: sin métricas")).toBeInTheDocument();
+    });
+
+    it("closes the detail modal when it reports onClose", () => {
+      render(<TrainTable rows={rows} />);
+
+      fireEvent.click(screen.getByRole("button", { name: "04154" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    // El sondeo de flotaLD.json refresca cada 15s: un tren puede salir de la
+    // flota con su mapa ya abierto, y eso no debe cambiar la modal visible.
+    it("keeps the open map modal even if the train leaves the live fleet", () => {
+      const { rerender } = render(<TrainTable rows={rows} flota={flotaWith04154} />);
+      fireEvent.click(screen.getByRole("button", { name: "04154" }));
+
+      rerender(<TrainTable rows={rows} flota={new Map()} />);
+
+      expect(screen.getByRole("dialog", { name: "mapa de 04154" })).toBeInTheDocument();
     });
   });
 });

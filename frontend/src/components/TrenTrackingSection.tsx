@@ -6,6 +6,7 @@ import { DayView } from "./DayView";
 import { TodayView } from "./TodayView";
 import { useRenfeFlota } from "../hooks/useRenfeFlota";
 import { useTrainSchedule } from "../hooks/useTrainSchedule";
+import { useTrainStats } from "../hooks/useTrainStats";
 import { addDaysIso, yesterdayMadrid } from "../utils/dateLimits";
 
 // Contenido íntegro de la antigua vista principal de App.tsx (hoy/día +
@@ -15,6 +16,7 @@ export function TrenTrackingSection() {
   const [selectedDate, setSelectedDate] = useState("");
   const flota = useRenfeFlota();
   const schedule = useTrainSchedule();
+  const { metrics, globalMetrics } = useTrainStats();
   const maxDate = yesterdayMadrid();
   // selectedDate === "" significa "hoy" (vista en vivo, sin fecha volcada
   // todavía); para calcular el día anterior necesitamos su equivalente ISO.
@@ -61,9 +63,14 @@ export function TrenTrackingSection() {
       </header>
       <main className="app-main">
         {selectedDate ? (
-          <DayView date={selectedDate} flota={flota} schedule={schedule} />
+          <DayView date={selectedDate} schedule={schedule} metrics={metrics} globalMetrics={globalMetrics} />
         ) : (
-          <TodayView flota={flota} schedule={schedule} />
+          <TodayView
+            flota={flota}
+            schedule={schedule}
+            metrics={metrics}
+            globalMetrics={globalMetrics}
+          />
         )}
       </main>
     </>

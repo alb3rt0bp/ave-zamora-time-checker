@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { fetchByDate, NotFoundError } from "../api";
-import type { RenfeTren, TrainRow, TrainSchedule } from "../types";
+import type { GlobalMetrics, TrainMetrics, TrainRow, TrainSchedule } from "../types";
 import { normalizeDayTrain } from "../utils/normalizeTrain";
 import { TrainTable } from "./TrainTable";
 
@@ -8,11 +8,15 @@ type Status = "loading" | "ok" | "not-found" | "error";
 
 interface DayViewProps {
   date: string;
-  flota?: Map<string, RenfeTren>;
   schedule?: Map<string, TrainSchedule>;
+  metrics?: Map<string, TrainMetrics>;
+  globalMetrics?: GlobalMetrics | null;
 }
 
-export function DayView({ date, flota, schedule }: DayViewProps) {
+// Sin flota a propósito: esta vista solo muestra días ya volcados, donde la
+// posición en vivo de un tren que hoy circula con el mismo codComercial no
+// corresponde al viaje que se está consultando.
+export function DayView({ date, schedule, metrics, globalMetrics }: DayViewProps) {
   const [rows, setRows] = useState<TrainRow[]>([]);
   const [status, setStatus] = useState<Status>("loading");
 
@@ -52,5 +56,5 @@ export function DayView({ date, flota, schedule }: DayViewProps) {
         No se han podido cargar los trenes de esa fecha.
       </p>
     );
-  return <TrainTable rows={rows} flota={flota} schedule={schedule} />;
+  return <TrainTable rows={rows} schedule={schedule} metrics={metrics} globalMetrics={globalMetrics} />;
 }

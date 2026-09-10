@@ -23,6 +23,17 @@ tramos se nombran por severidad, no por el número literal, precisamente
 porque el límite intermedio (leve/significativo) es configurable. "Retraso
 significativo" a efectos de ranking/riesgo = tramos significativo+grave.
 
+Los items TRAIN# guardan además histograma_retraso: un mapa
+{minutos_retraso -> nº de viajes} con el detalle exacto minuto a minuto, del
+que la API deriva la mediana y los percentiles P25/P75/P90 que la pantalla de
+detalle usa para estimar la hora probable de llegada. Es un estadístico
+suficiente para cualquier percentil (no pierde información frente a guardar
+los minutos crudos) y se actualiza de forma incremental, un +1 por viaje, sin
+releer el histórico de S3. Los 4 tramos de arriba NO bastan para esto: un
+tramo de 45 minutos de ancho ('significativo') obliga a suponer una
+distribución dentro del tramo, y el retraso real no es uniforme sino una cola
+decreciente.
+
 Cada item guarda last_aggregated_date: si ya coincide con el día que se está
 volcando, se salta sin sumar de nuevo — necesario porque EventBridge
 Scheduler invoca daily_dump_handler de forma asíncrona y puede reintentar
@@ -145,6 +156,12 @@ class MetricsWriter:
             contribution = self._aggregate_buckets(recs)
             for key in _ZERO_DELAY_BUCKETS:
                 item[key] = int(item.get(key, 0)) + contribution[key]
+
+            histogram = {k: int(v) for k, v in (item.get("histograma_retraso") or {}).items()}
+            for minute, count in self._aggregate_histogram(recs).items():
+                histogram[minute] = histogram.get(minute, 0) + count
+            item["histograma_retraso"] = histogram
+
             item["last_aggregated_date"] = target_iso
             item["updated_at"] = now_local.isoformat()
 
@@ -241,6 +258,21 @@ class MetricsWriter:
             counts[f"viajes_bucket_{bucket}"] += 1
             if bucket in ("significativo", "grave"):
                 counts["suma_retraso_significativo_minutos"] += minutos
+        return counts
+
+    @staticmethod
+    def _aggregate_histogram(records: list[dict]) -> dict[str, int]:
+        """
+        {minutos_retraso -> nº de viajes} de este lote. Las claves son str
+        porque DynamoDB solo admite strings como claves de mapa; los valores
+        negativos (tren adelantado, ~8% de los viajes) se guardan tal cual
+        ("-2") en vez de truncarse a 0: son datos reales y truncarlos
+        sesgaría los percentiles bajos hacia arriba.
+        """
+        counts: dict[str, int] = {}
+        for record in records:
+            key = str(record["minutos_retraso"])
+            counts[key] = counts.get(key, 0) + 1
         return counts
 
     def _aggregate_significant(self, records: list[dict]) -> dict:

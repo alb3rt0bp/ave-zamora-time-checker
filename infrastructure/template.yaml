@@ -71,6 +71,18 @@ Parameters:
       concern distinto que hoy comparte el mismo valor por coincidencia)
       — ver lambdas/train_tracker/metrics_writer.py.
 
+  DelayEstimateMinSample:
+    Type: Number
+    Default: 8
+    MinValue: 1
+    Description: >
+      Nº mínimo de viajes registrados para que la pantalla de detalle use la
+      mediana del propio tren como estimación de retraso. Por debajo de este
+      umbral el tren hereda la estimación de su sentido: un backtest
+      leave-one-out sobre el histórico del Data Lake mostró que la mediana
+      propia solo empieza a batir a la del sentido a partir de ~8 viajes
+      — ver lambdas/api/handler.py.
+
   FlagshipMadridTrainCode:
     Type: String
     Default: "04154"
@@ -113,7 +125,7 @@ Parameters:
 
   GtfsScheduleEnabled:
     Type: String
-    Default: "false"
+    Default: "true"
     AllowedValues: ["true", "false"]
     Description: >
       Activa la resolución diaria del horario de trenes desde el GTFS
@@ -190,6 +202,7 @@ Globals:
         DYNAMODB_STATE_TABLE: !Ref TrainStateTable
         DYNAMODB_METRICS_TABLE: !Ref TrainMetricsTable
         SIGNIFICANT_DELAY_THRESHOLD_MINUTES: !Ref SignificantDelayThresholdMinutes
+        DELAY_ESTIMATE_MIN_SAMPLE: !Ref DelayEstimateMinSample
         TRENDS_S3_KEY:        "trends/latest_hashtags.json"
         LOG_LEVEL:            INFO
 
@@ -984,6 +997,16 @@ Resources:
   # sobre la misma base de datos Glue, que a diferencia de casi todo lo demás
   # en este stack no está namespaced por CloudFormation (no admite un nombre
   # generado automáticamente ligado al stack).
+  #
+  # Si en el futuro hace falta volver a tocar Name en DatabaseInput: el
+  # proveedor de CloudFormation para AWS::Glue::Database tiene un bug
+  # conocido al renombrar in-place (intenta actualizar contra el nombre
+  # NUEVO, que aún no existe, y falla con "Database ... not found"). La
+  # única forma fiable es cambiar el ID lógico de este recurso, y como
+  # CloudFormation no garantiza el orden entre un Delete y un Create de IDs
+  # lógicos independientes cuando el nombre físico no cambia, hace falta
+  # migrar en dos deploys: uno que borre este recurso (libera el nombre) y
+  # un segundo que lo vuelva a crear con el ID lógico definitivo.
   GlueDatabase:
     Type: AWS::Glue::Database
     Properties:

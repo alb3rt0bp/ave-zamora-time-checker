@@ -65,11 +65,28 @@ export interface DelayBuckets {
   suma_retraso_significativo_minutos: number;
 }
 
+// Estimación de retraso de un tren concreto, derivada por la API del
+// histograma minuto a minuto que metrics_writer acumula en DynamoDB. La
+// mediana es el estimador que mejor predijo en el backtest sobre el
+// histórico; P25/P75 acotan el rango habitual y P90 el caso excepcional.
+// base "sentido" = el tren aún no tiene viajes suficientes y hereda la
+// estimación del conjunto de su sentido.
+export interface DelayEstimate {
+  mediana_minutos: number;
+  p25_minutos: number;
+  p75_minutos: number;
+  p90_minutos: number;
+  viajes_estimacion: number;
+  base: "tren" | "sentido";
+}
+
 export interface TrainMetrics extends DelayBuckets {
   cod_comercial: string;
   sentido: string;
   rank_retraso: number;
   total_trenes_comparados: number;
+  // null mientras no haya ningún viaje registrado de ese sentido.
+  estimacion_retraso: DelayEstimate | null;
 }
 
 // Resumen reducido de un tren dentro de una semana/mes concretos (no lleva

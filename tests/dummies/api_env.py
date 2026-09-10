@@ -36,6 +36,7 @@ if API_DIR not in sys.path:
 os.environ.setdefault("DATALAKE_S3_BUCKET", aws_env.S3_BUCKET_NAME)
 os.environ.setdefault("DYNAMODB_STATE_TABLE", aws_env.DYNAMODB_TABLE_NAME)
 os.environ.setdefault("DYNAMODB_METRICS_TABLE", aws_env.DYNAMODB_METRICS_TABLE_NAME)
+os.environ.setdefault("DELAY_ESTIMATE_MIN_SAMPLE", "8")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 
 AWS_REGION = aws_env.AWS_REGION
