@@ -1,7 +1,7 @@
 """
 claude_client.py
 Redacta el texto de un tuit y sus hashtags a partir de los datos de un tren
-con retraso, usando Claude Sonnet 4.6 vía Amazon Bedrock (InvokeModel, sin
+con retraso, usando Claude Sonnet 5 vía Amazon Bedrock (InvokeModel, sin
 el SDK de Anthropic — solo boto3, igual que el resto de este proyecto).
 
 Bedrock no soporta ninguna server-side tool (búsqueda web incluida), así
@@ -24,7 +24,7 @@ import trends_reader
 logger = logging.getLogger(f"tweet_notifier.{__name__}")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "global.anthropic.claude-sonnet-4-6")
+CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "global.anthropic.claude-sonnet-5")
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
 TRENDS_ENABLED = os.environ.get("TRENDS_ENABLED", "true").lower() == "true"
 ANTHROPIC_VERSION = "bedrock-2023-05-31"
@@ -40,15 +40,17 @@ GENERIC_HASHTAGS = {
  "#Renfe", "#TrenAVE", "#MovilidadSostenible", "#TransportePublico", "#FerrocarrilEspañol"
 }
 
-SYSTEM_PROMPT = f"""Eres el Social Manager en X (Twitter) de la Asociación de \
-Usuarios de Trenes AVE de Zamora. Redactas un único tuit (máximo 280 \
+SYSTEM_PROMPT = f"""Eres el Social Manager en X (Twitter) de la Asociación de 
+Usuarios de Trenes de Zamora. Redactas un único tuit (máximo 280 \
 caracteres en total, contando el texto y los hashtags) a partir de los \
 datos de un tren concreto, con un tono reivindicativo pero riguroso, \
 cercano, comparativo y urgente — nunca victimista, siempre basado en \
 hechos.
 
-Actores a mencionar cuando encaje de forma natural: @Renfe, @adif_es, el \
-Ministerio de Transportes.
+Actores a mencionar cuando encaje de forma natural:
+- @Renfe (Operadora de servicios ferroviarios)
+- @Adif_es (Gestora de infraestructuras ferroviarias)
+- @transportesgob (Ministerio Transportes y Movilidad Sostenible)
 
 El prompt recibe 2 parámetros: `hora_prevista` y `hora_real`. Son las horas de llegada a Destino: 
 - A Madrid si el sentido es Madrid
@@ -73,10 +75,10 @@ las instituciones no se olviden de Zamora — no menciones el tren \
 madrugador en este caso.
 
 Con los 2 casos de tren madrugador, además del mensaje es conveniente mencionar las siguientes cuentas:
-- @diputación_de_zamora
-- @jcyl
-- @minsterio_de_transportes
-- @gobierno_de_españa
+- @dipuzamora (Diputación de Zamora)
+- @jcyl (Junta de Comunidades de Castilla y León)
+- @transportesgob (Ministerio Transportes y Movilidad Sostenible)
+- @desdelamoncloa (Cuenta oficial del Gobierno de España)
 
 Hashtags: elige entre 2 y 4, variando entre tuits. Incluye SIEMPRE al \
 menos uno de este grupo reivindicativo: {', '.join(ADVOCACY_HASHTAGS)}. Completa con \

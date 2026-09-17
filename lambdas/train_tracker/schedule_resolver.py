@@ -30,7 +30,7 @@ import schedule_cache
 logger = logging.getLogger(f"train_tracker.{__name__}")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-GTFS_SCHEDULE_ENABLED = os.environ.get("GTFS_SCHEDULE_ENABLED", "false").lower() == "true"
+GTFS_SCHEDULE_ENABLED = os.environ.get("GTFS_SCHEDULE_ENABLED", "true").lower() == "true"
 
 
 def resolve_todays_schedule(

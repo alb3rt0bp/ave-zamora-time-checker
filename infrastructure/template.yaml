@@ -92,14 +92,6 @@ Parameters:
       alerta de tuit siempre, tenga o no retraso — ver
       train_tracker/handler.py:_maybe_publish_delay_alert.
 
-  ClaudeModelId:
-    Type: String
-    Default: global.anthropic.claude-sonnet-4-6
-    Description: >
-      ID de modelo Bedrock (con prefijo de inference profile: este modelo
-      solo se sirve vía cross-region inference, no on-demand) usado por
-      tweet_notifier para redactar el texto del tuit y los hashtags.
-
   NegativeDelayAnomalyThresholdMinutes:
     Type: Number
     Default: -10
@@ -123,28 +115,15 @@ Parameters:
       todavía provisional (ver CLAUDE.md) — actívese a propósito cuando se
       quiera empezar la ventana de comparación.
 
-  GtfsScheduleEnabled:
-    Type: String
-    Default: "true"
-    AllowedValues: ["true", "false"]
-    Description: >
-      Activa la resolución diaria del horario de trenes desde el GTFS
-      estático de Renfe (ver lambdas/train_tracker/schedule_resolver.py) en
-      vez de train_schedules.json compilado a mano. El horario resuelto se
-      cachea en S3 (schedules/{fecha}.json), un objeto por día. Por defecto
-      desactivado: activar a propósito tras revisar manualmente unos días de
-      horarios resueltos (p.ej. vía CloudWatch Logs o el objeto cacheado en
-      S3) frente a train_schedules.json. Con el flag desactivado — o si la
-      resolución desde GTFS falla ese día — se usa siempre
-      train_schedules.json como fallback, con aviso a AlertEmailAddress.
-
   GtfsZipUrl:
     Type: String
     Default: "https://ssl.renfe.com/gtransit/Fichero_AV_LD/google_transit.zip"
     Description: >
-      URL del GTFS estático de AV/Larga Distancia de Renfe. Solo relevante
-      si GtfsScheduleEnabled=true. Parametrizado por si Renfe cambia la URL
-      sin previo aviso, para poder apuntar a otra sin tocar código.
+      URL del GTFS estático de AV/Larga Distancia de Renfe. Usado por la
+      resolución diaria del horario (ver lambdas/train_tracker/
+      schedule_resolver.py, activada de forma fija vía GTFS_SCHEDULE_ENABLED
+      en TrainTrackerFunction). Parametrizado por si Renfe cambia la URL sin
+      previo aviso, para poder apuntar a otra sin tocar código.
 
   DomainName:
     Type: String
@@ -311,7 +290,7 @@ Resources:
           DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
           FLAGSHIP_MADRID_TRAIN_CODE: !Ref FlagshipMadridTrainCode
           GTFS_RT_ENRICHMENT_ENABLED: !Ref GtfsRtEnrichmentEnabled
-          GTFS_SCHEDULE_ENABLED: !Ref GtfsScheduleEnabled
+          GTFS_SCHEDULE_ENABLED: "true"
           GTFS_ZIP_URL: !Ref GtfsZipUrl
           DATA_QUALITY_ALERT_SNS_TOPIC_ARN: !If [HasAlertEmail, !Ref AlertTopic, ""]
           NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES: !Ref NegativeDelayAnomalyThresholdMinutes
@@ -439,7 +418,7 @@ Resources:
       Environment:
         Variables:
           X_API_CREDENTIALS_SECRET_ARN: !Ref XApiCredentialsSecret
-          CLAUDE_MODEL_ID: !Ref ClaudeModelId
+          CLAUDE_MODEL_ID: "global.anthropic.claude-sonnet-5"
           DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
           TRENDS_ENABLED: "true"
       Policies:
@@ -456,8 +435,8 @@ Resources:
             - Effect: Allow
               Action: bedrock:InvokeModel
               Resource:
-                - !Sub "arn:aws:bedrock:${AwsRegion}:${AWS::AccountId}:inference-profile/${ClaudeModelId}"
-                - "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-6"
+                - !Sub "arn:aws:bedrock:${AwsRegion}:${AWS::AccountId}:inference-profile/global.anthropic.claude-sonnet-5"
+                - "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5"
             # Los modelos de Anthropic en Bedrock están sujetos a suscripción
             # de AWS Marketplace por debajo: sin estos dos permisos, la
             # comprobación de entitlement de InvokeModel puede fallar aunque

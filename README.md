@@ -84,7 +84,7 @@ Lambda poll+reencola    →    Lambda stateless con lógica de ventana
 │                                                                              │
 │  ┌──────────────────┐     ┌──────────────────┐     ┌─────────────────┐    │
 │  │  SNS             │────▶│  Lambda          │────▶│  Claude Sonnet   │    │
-│  │  DelayTweetTopic │     │  tweet-notifier  │     │  4.6 (Bedrock)   │    │
+│  │  DelayTweetTopic │     │  tweet-notifier  │     │  5 (Bedrock)     │    │
 │  └──────────────────┘     └────────┬─────────┘     └─────────────────┘    │
 │                                     │ enriquecimiento aditivo               │
 │                                     ▼                                       │
@@ -194,7 +194,7 @@ fallo o lentitud de Bedrock/X/xfetch nunca bloquea ni ralentiza
 La Lambda `tweet-notifier` (`lambdas/tweet_notifier/`) consume esos eventos:
 
 - **`claude_client.py`** redacta el texto del tuit y sus hashtags con Claude
-  Sonnet 4.6 en Amazon Bedrock (`invoke_model` con salida estructurada
+  Sonnet 5 en Amazon Bedrock (`invoke_model` con salida estructurada
   `json_schema`, sin el SDK de Anthropic), con un prompt que distingue tres
   situaciones (tren madrugador con retraso, tren madrugador puntual, retraso
   genérico) y fuerza siempre al menos un hashtag reivindicativo.
@@ -237,7 +237,7 @@ ave-zamora-time-checker/
 │   │   └── handler.py                 # API HTTP solo lectura: get_today_handler / get_day_handler
 │   └── tweet_notifier/
 │       ├── handler.py                 # Disparado por SNS: redacta y (por ahora) solo loguea el tuit
-│       ├── claude_client.py           # draft_tweet vía Claude Sonnet 4.6 en Bedrock
+│       ├── claude_client.py           # draft_tweet vía Claude Sonnet 5 en Bedrock
 │       ├── xfetch_client.py           # Tendencias reales de X desde xfetch.io (enriquecimiento)
 │       ├── x_client.py                # Cliente OAuth1.0a para publicar en la API v2 de X
 │       └── requirements.txt           # Solo librería estándar (boto3 va en el runtime)
@@ -351,10 +351,10 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
 - **SNS `DelayTweetTopic`** — desacopla `train-tracker` de la redacción del
   tuit; se crea siempre (no depende de `AlertEmailAddress`).
 - **Lambda `tweet-notifier`** — disparada por `DelayTweetTopic`. Redacta el
-  tuit con Claude Sonnet 4.6 en Bedrock más tendencias de xfetch.io; por
+  tuit con Claude Sonnet 5 en Bedrock más tendencias de xfetch.io; por
   ahora solo loguea el resultado (ver arriba). Necesita permisos extra sobre
   Bedrock (`InvokeModel` sobre el inference profile *y* el foundation model,
-  ya que Sonnet 4.6 solo se sirve vía cross-region inference) y sobre AWS
+  ya que Sonnet 5 solo se sirve vía cross-region inference) y sobre AWS
   Marketplace (`ViewSubscriptions`/`Subscribe`, sin scoping por recurso —
   la suscripción a modelos de Anthropic en Bedrock pasa por Marketplace por
   debajo).
@@ -385,10 +385,10 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
 | `NegativeDelayAnomalyThresholdMinutes` | `NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES` | `-10` | Umbral por debajo del cual un `ultRetraso` se considera bug de Renfe y se recalcula |
 | `DelayAlertThresholdMinutes` | `DELAY_ALERT_THRESHOLD_MINUTES` | `15` | Retraso mínimo (min) al marcar un tren entregado para publicar alerta de tuit |
 | `FlagshipMadridTrainCode` | `FLAGSHIP_MADRID_TRAIN_CODE` | `04154` | Tren madrugador: dispara alerta de tuit siempre, tenga o no retraso |
-| `ClaudeModelId` | `CLAUDE_MODEL_ID` | `global.anthropic.claude-sonnet-4-6` | Modelo Bedrock (inference profile) usado por `tweet_notifier` |
 | `GtfsRtEnrichmentEnabled` | `GTFS_RT_ENRICHMENT_ENABLED` | `false` | Activa el enriquecimiento aditivo con el feed GTFS-RT oficial de Renfe |
-| `GtfsScheduleEnabled` | `GTFS_SCHEDULE_ENABLED` | `false` | Resuelve el horario del día desde el GTFS estático de Renfe en vez de `train_schedules.json` (fallback si falla) |
-| `GtfsZipUrl` | `GTFS_ZIP_URL` | URL del GTFS estático | Solo relevante si `GtfsScheduleEnabled=true` |
+| `GtfsZipUrl` | `GTFS_ZIP_URL` | URL del GTFS estático | Usado por la resolución diaria del horario desde GTFS |
+| — | `CLAUDE_MODEL_ID` | `global.anthropic.claude-sonnet-5` | Fijo en `template.yaml` (no es parámetro de stack: mismo modelo en todos los entornos) — modelo Bedrock (inference profile) usado por `tweet_notifier` |
+| — | `GTFS_SCHEDULE_ENABLED` | `true` | Fijo en `template.yaml` (no es parámetro de stack): resuelve el horario del día desde el GTFS estático de Renfe en vez de `train_schedules.json` (fallback si falla) |
 | — | `XFETCH_TRENDS_ENABLED` | `true` | Activa el enriquecimiento con tendencias reales de xfetch.io en `tweet_notifier` |
 
 ---
