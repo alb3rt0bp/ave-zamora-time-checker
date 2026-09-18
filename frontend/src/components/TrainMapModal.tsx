@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import type { ReactNode } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { MapContainer, Marker, TileLayer, useMap } from "react-leaflet";
@@ -50,6 +51,75 @@ function FlyToTrain({ position, zoom }: FlyToTrainProps) {
   return null;
 }
 
+export interface TrainMapFaceProps {
+  codComercial: string;
+  sentido: string;
+  horaSalida: string | null;
+  horaLlegada: string | null;
+  retrasoMinutos: number | null;
+  cancelado: boolean;
+  train: RenfeTren | undefined;
+  // Acciones de la cabecera (volteo + cerrar en TrainLiveModal, solo cerrar
+  // en el TrainMapModal independiente de más abajo).
+  headerActions: ReactNode;
+}
+
+// Contenido de la cara "mapa": cabecera + mapa en vivo, sin el
+// backdrop/sheet/grabber que lo envuelve, para poder reutilizarlo dentro de
+// TrainLiveModal (ver ese fichero) además de en el TrainMapModal
+// independiente de abajo.
+export function TrainMapFace({
+  codComercial,
+  sentido,
+  horaSalida,
+  horaLlegada,
+  retrasoMinutos,
+  cancelado,
+  train,
+  headerActions,
+}: TrainMapFaceProps) {
+  const icon = useMemo(() => createTrainIcon(sentido), [sentido]);
+
+  // El tren pudo desaparecer de la flota (p.ej. llegó a destino) mientras la
+  // modal estaba abierta; en ese caso ya no hay una posición que mostrar.
+  if (!train) return null;
+
+  const position: [number, number] = [train.latitud, train.longitud];
+  const targetZoom = computeZoomForScale(train.latitud);
+  const status = delayStatus(retrasoMinutos, cancelado);
+
+  return (
+    <>
+      <div className="modal-header">
+        <div>
+          <h2 className="modal-title">Tren {codComercial}</h2>
+          <p className="modal-subtitle">
+            <span className="sentido-badge">{sentido}</span>
+            {horaSalida && <span className="modal-subtitle__item">Salida {horaSalida}</span>}
+            {horaLlegada && <span className="modal-subtitle__item">Llegada {horaLlegada}</span>}
+            {!cancelado && (
+              <span className={`status-pill status-pill--${status} modal-subtitle__item`}>
+                {formatDelay(retrasoMinutos)}
+              </span>
+            )}
+          </p>
+        </div>
+        {headerActions}
+      </div>
+      <div className="map-wrap">
+        <MapContainer center={SPAIN_CENTER} zoom={SPAIN_ZOOM} zoomSnap={0.25} className="leaflet-fill">
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <Marker position={position} icon={icon} />
+          <FlyToTrain position={position} zoom={targetZoom} />
+        </MapContainer>
+      </div>
+    </>
+  );
+}
+
 interface TrainMapModalProps {
   codComercial: string;
   sentido: string;
@@ -72,7 +142,6 @@ export function TrainMapModal({
   onClose,
 }: TrainMapModalProps) {
   const train = flota.get(codComercial);
-  const icon = useMemo(() => createTrainIcon(sentido), [sentido]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -86,10 +155,6 @@ export function TrainMapModal({
   // modal estaba abierta; en ese caso ya no hay una posición que mostrar.
   if (!train) return null;
 
-  const position: [number, number] = [train.latitud, train.longitud];
-  const targetZoom = computeZoomForScale(train.latitud);
-  const status = delayStatus(retrasoMinutos, cancelado);
-
   return (
     <div
       role="dialog"
@@ -100,34 +165,20 @@ export function TrainMapModal({
     >
       <div className="modal-sheet glass" onClick={(event) => event.stopPropagation()}>
         <div className="modal-grabber" aria-hidden="true" />
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">Tren {codComercial}</h2>
-            <p className="modal-subtitle">
-              <span className="sentido-badge">{sentido}</span>
-              {horaSalida && <span className="modal-subtitle__item">Salida {horaSalida}</span>}
-              {horaLlegada && <span className="modal-subtitle__item">Llegada {horaLlegada}</span>}
-              {!cancelado && (
-                <span className={`status-pill status-pill--${status} modal-subtitle__item`}>
-                  {formatDelay(retrasoMinutos)}
-                </span>
-              )}
-            </p>
-          </div>
-          <button type="button" className="icon-btn icon-btn--glass" onClick={onClose} aria-label="Cerrar">
-            ✕
-          </button>
-        </div>
-        <div className="map-wrap">
-          <MapContainer center={SPAIN_CENTER} zoom={SPAIN_ZOOM} zoomSnap={0.25} className="leaflet-fill">
-            <TileLayer
-              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-            <Marker position={position} icon={icon} />
-            <FlyToTrain position={position} zoom={targetZoom} />
-          </MapContainer>
-        </div>
+        <TrainMapFace
+          codComercial={codComercial}
+          sentido={sentido}
+          horaSalida={horaSalida}
+          horaLlegada={horaLlegada}
+          retrasoMinutos={retrasoMinutos}
+          cancelado={cancelado}
+          train={train}
+          headerActions={
+            <button type="button" className="icon-btn icon-btn--glass" onClick={onClose} aria-label="Cerrar">
+              ✕
+            </button>
+          }
+        />
       </div>
     </div>
   );

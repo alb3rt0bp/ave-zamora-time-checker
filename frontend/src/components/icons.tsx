@@ -53,3 +53,17 @@ export function MenuIcon(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+// Botón de volteo (mapa en vivo <-> detalle estadístico de un mismo tren):
+// dos flechas opuestas en vez de un símbolo de "recargar", para no
+// confundirse con el ↻ de refresco de la barra de herramientas.
+export function FlipIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg {...baseProps(props)}>
+      <polyline points="17 4 21 8 17 12" />
+      <line x1="21" y1="8" x2="3" y2="8" />
+      <polyline points="7 12 3 16 7 20" />
+      <line x1="3" y1="16" x2="21" y2="16" />
+    </svg>
+  );
+}

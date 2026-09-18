@@ -111,10 +111,19 @@ describe("PorTrenesPage", () => {
     await screen.findByText("Laborables");
     const chips = screen.getAllByRole("button", { name: /04/ });
     expect(chips.map((chip) => chip.textContent)).toEqual([
-      "04154 · Madrid",
-      "04157 · Madrid",
-      "04160 · Madrid",
+      "04154 · Madrid06:56 → 08:56",
+      "04157 · Madrid12:10 → 14:10",
+      "04160 · Madrid18:30 → 20:30",
     ]);
+  });
+
+  it("shows the scheduled departure and arrival times on each chip", async () => {
+    mockHappyPath();
+    render(<PorTrenesPage />);
+
+    await screen.findByText("Laborables");
+    expect(screen.getByText("06:56 → 08:56")).toBeInTheDocument();
+    expect(screen.getByText("20:19 → 21:32")).toBeInTheDocument();
   });
 
   it("opens the stats modal with the train's metrics when a chip is clicked", async () => {

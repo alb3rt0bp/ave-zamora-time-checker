@@ -1,10 +1,34 @@
-import { fetchTrainSchedule } from "../api";
-import type { TrainSchedule } from "../types";
+import { useState } from "react";
+import { fetchGlobalMetrics, fetchTrainMetrics, fetchTrainSchedule, NotFoundError } from "../api";
+import type { GlobalMetrics, TrainMetrics, TrainSchedule } from "../types";
 import { useFetch } from "../hooks/useFetch";
 import { WEEKDAY_GROUPS, groupByWeekdayGroup } from "../utils/weekdayGroups";
+import { TrainStatsModal } from "./TrainStatsModal";
+
+interface PageData {
+  schedule: TrainSchedule[];
+  trains: TrainMetrics[];
+  global: GlobalMetrics | null;
+}
+
+// Mismo patrón que PorTrenesPage.tsx: /metrics/global puede no existir
+// todavía (ningún volcado ejecutado aún), eso no debe impedir mostrar el
+// horario, solo que el modal de detalle no pueda mostrar "desde <fecha>".
+async function loadPageData(): Promise<PageData> {
+  const [schedule, trains, global] = await Promise.all([
+    fetchTrainSchedule(),
+    fetchTrainMetrics(),
+    fetchGlobalMetrics().catch((err: unknown) => {
+      if (err instanceof NotFoundError) return null;
+      throw err;
+    }),
+  ]);
+  return { schedule, trains, global };
+}
 
 export function HorariosPage() {
-  const state = useFetch(fetchTrainSchedule, []);
+  const state = useFetch(loadPageData, []);
+  const [openTrainCode, setOpenTrainCode] = useState<string | null>(null);
 
   return (
     <>
@@ -23,17 +47,30 @@ export function HorariosPage() {
             No se han podido cargar los horarios.
           </p>
         )}
-        {state.status === "ok" && <HorariosList schedule={state.data} />}
+        {state.status === "ok" && (
+          <HorariosList schedule={state.data.schedule} onSelectTrain={setOpenTrainCode} />
+        )}
       </main>
+      {openTrainCode && state.status === "ok" && (
+        <TrainStatsModal
+          codComercial={openTrainCode}
+          schedule={state.data.schedule.find((train) => train.cod_comercial === openTrainCode)}
+          metrics={state.data.trains.find((train) => train.cod_comercial === openTrainCode)}
+          firstAggregatedDate={state.data.global?.first_aggregated_date}
+          thresholdMinutes={state.data.global?.significant_delay_threshold_minutes}
+          onClose={() => setOpenTrainCode(null)}
+        />
+      )}
     </>
   );
 }
 
 interface HorariosListProps {
   schedule: TrainSchedule[];
+  onSelectTrain: (codComercial: string) => void;
 }
 
-function HorariosList({ schedule }: HorariosListProps) {
+function HorariosList({ schedule, onSelectTrain }: HorariosListProps) {
   if (schedule.length === 0) {
     return <p className="state-card">No hay trenes en el horario.</p>;
   }
@@ -63,7 +100,14 @@ function HorariosList({ schedule }: HorariosListProps) {
                   {trains.map((train) => (
                     <tr key={train.cod_comercial}>
                       <td>
-                        <span className="cell-primary">{train.cod_comercial}</span>
+                        <button
+                          type="button"
+                          className="train-chip train-chip--detalle"
+                          title={`Ver el detalle del tren ${train.cod_comercial}`}
+                          onClick={() => onSelectTrain(train.cod_comercial)}
+                        >
+                          {train.cod_comercial}
+                        </button>
                       </td>
                       <td>
                         <span className="sentido-badge">{train.sentido}</span>

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import type { ReactNode } from "react";
 import type { DelayEstimate, TrainMetrics, TrainSchedule } from "../types";
 import { addMinutesToTime } from "../utils/delayEstimate";
 import { formatSpanishDate } from "../utils/metricsFormat";
@@ -68,6 +69,83 @@ function ArrivalEstimate({
   );
 }
 
+export interface TrainStatsFaceProps {
+  codComercial: string;
+  schedule: TrainSchedule | undefined;
+  metrics: TrainMetrics | undefined;
+  firstAggregatedDate: string | undefined;
+  thresholdMinutes: number | undefined;
+  // Acciones de la cabecera (volteo + cerrar en TrainLiveModal, solo cerrar
+  // en el TrainStatsModal independiente de más abajo).
+  headerActions: ReactNode;
+}
+
+// Contenido de la cara "detalle": cabecera + estadísticas, sin el
+// backdrop/sheet/grabber que lo envuelve, para poder reutilizarlo dentro de
+// TrainLiveModal (ver TrainMapModal.tsx) además de en el TrainStatsModal
+// independiente de abajo.
+export function TrainStatsFace({
+  codComercial,
+  schedule,
+  metrics,
+  firstAggregatedDate,
+  thresholdMinutes,
+  headerActions,
+}: TrainStatsFaceProps) {
+  const estimate = metrics?.estimacion_retraso ?? null;
+
+  return (
+    <>
+      <div className="modal-header">
+        <div>
+          <h2 className="modal-title">Tren {codComercial}</h2>
+          {schedule && (
+            <p className="modal-subtitle">
+              <span className="modal-subtitle__item">Salida {schedule.hora_salida}</span>
+              <span className="modal-subtitle__item">
+                Llegada {schedule.hora_llegada_destino}
+                {estimate && (
+                  <span className="modal-subtitle__delta">{formatDelay(estimate.mediana_minutos)}</span>
+                )}
+              </span>
+            </p>
+          )}
+        </div>
+        {headerActions}
+      </div>
+
+      {metrics ? (
+        <div className="train-stats">
+          {estimate && schedule && (
+            <ArrivalEstimate
+              estimate={estimate}
+              horaLlegadaDestino={schedule.hora_llegada_destino}
+              sentido={metrics.sentido}
+              firstAggregatedDate={firstAggregatedDate}
+            />
+          )}
+          <DonutChart buckets={metrics} thresholdMinutes={thresholdMinutes} />
+          <dl className="stats-summary">
+            <div className="stats-row">
+              <dt>
+                Retrasos significativos acumulados
+                {firstAggregatedDate ? ` desde ${formatSpanishDate(firstAggregatedDate)}` : ""}
+              </dt>
+              <dd>{metrics.suma_retraso_significativo_minutos} min</dd>
+            </div>
+            <div className="stats-row">
+              <dt>Riesgo de retraso significativo</dt>
+              <dd>{metrics.pct_retraso_significativo}%</dd>
+            </div>
+          </dl>
+        </div>
+      ) : (
+        <p className="state-card">Todavía no hay datos de puntualidad para este tren.</p>
+      )}
+    </>
+  );
+}
+
 // Mismo patrón de interacción que TrainMapModal (backdrop/sheet/grabber/
 // Escape), con estadísticas del tren en vez de su posición en vivo.
 export function TrainStatsModal({
@@ -86,8 +164,6 @@ export function TrainStatsModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  const estimate = metrics?.estimacion_retraso ?? null;
-
   return (
     <div
       role="dialog"
@@ -98,56 +174,18 @@ export function TrainStatsModal({
     >
       <div className="modal-sheet glass" onClick={(event) => event.stopPropagation()}>
         <div className="modal-grabber" aria-hidden="true" />
-        <div className="modal-header">
-          <div>
-            <h2 className="modal-title">Tren {codComercial}</h2>
-            {schedule && (
-              <p className="modal-subtitle">
-                <span className="modal-subtitle__item">Salida {schedule.hora_salida}</span>
-                <span className="modal-subtitle__item">
-                  Llegada {schedule.hora_llegada_destino}
-                  {estimate && (
-                    <span className="modal-subtitle__delta">
-                      {formatDelay(estimate.mediana_minutos)}
-                    </span>
-                  )}
-                </span>
-              </p>
-            )}
-          </div>
-          <button type="button" className="icon-btn icon-btn--glass" onClick={onClose} aria-label="Cerrar">
-            ✕
-          </button>
-        </div>
-
-        {metrics ? (
-          <div className="train-stats">
-            {estimate && schedule && (
-              <ArrivalEstimate
-                estimate={estimate}
-                horaLlegadaDestino={schedule.hora_llegada_destino}
-                sentido={metrics.sentido}
-                firstAggregatedDate={firstAggregatedDate}
-              />
-            )}
-            <DonutChart buckets={metrics} thresholdMinutes={thresholdMinutes} />
-            <dl className="stats-summary">
-              <div className="stats-row">
-                <dt>
-                  Retrasos significativos acumulados
-                  {firstAggregatedDate ? ` desde ${formatSpanishDate(firstAggregatedDate)}` : ""}
-                </dt>
-                <dd>{metrics.suma_retraso_significativo_minutos} min</dd>
-              </div>
-              <div className="stats-row">
-                <dt>Riesgo de retraso significativo</dt>
-                <dd>{metrics.pct_retraso_significativo}%</dd>
-              </div>
-            </dl>
-          </div>
-        ) : (
-          <p className="state-card">Todavía no hay datos de puntualidad para este tren.</p>
-        )}
+        <TrainStatsFace
+          codComercial={codComercial}
+          schedule={schedule}
+          metrics={metrics}
+          firstAggregatedDate={firstAggregatedDate}
+          thresholdMinutes={thresholdMinutes}
+          headerActions={
+            <button type="button" className="icon-btn icon-btn--glass" onClick={onClose} aria-label="Cerrar">
+              ✕
+            </button>
+          }
+        />
       </div>
     </div>
   );

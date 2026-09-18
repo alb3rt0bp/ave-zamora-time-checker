@@ -100,7 +100,10 @@ function PorTrenesList({ schedule, onSelectTrain }: PorTrenesListProps) {
                 className="weekday-group__chip"
                 onClick={() => onSelectTrain(train.cod_comercial)}
               >
-                {`${train.cod_comercial} · ${train.sentido}`}
+                <span className="weekday-group__chip-title">{`${train.cod_comercial} · ${train.sentido}`}</span>
+                <span className="weekday-group__chip-times">
+                  {train.hora_salida} → {train.hora_llegada_destino}
+                </span>
               </button>
             ))}
           </div>

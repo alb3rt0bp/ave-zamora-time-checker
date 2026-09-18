@@ -1,10 +1,53 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 import { server } from "../mocks/server";
 import { HorariosPage } from "./HorariosPage";
 
 const API_BASE_URL = "http://localhost:3000";
+
+const TRAIN_METRICS = [
+  {
+    cod_comercial: "04154",
+    sentido: "Madrid",
+    total_viajes: 10,
+    viajes_bucket_puntual: 6,
+    viajes_bucket_leve: 1,
+    viajes_bucket_significativo: 2,
+    viajes_bucket_grave: 1,
+    pct_bucket_puntual: 60,
+    pct_bucket_leve: 10,
+    pct_bucket_significativo: 20,
+    pct_bucket_grave: 10,
+    viajes_retraso_significativo: 3,
+    pct_retraso_significativo: 30,
+    suma_retraso_significativo_minutos: 95,
+    rank_retraso: 1,
+    total_trenes_comparados: 2,
+    estimacion_retraso: null,
+  },
+];
+
+const GLOBAL_METRICS = {
+  total_viajes: 10,
+  viajes_bucket_puntual: 6,
+  viajes_bucket_leve: 1,
+  viajes_bucket_significativo: 2,
+  viajes_bucket_grave: 1,
+  pct_bucket_puntual: 60,
+  pct_bucket_leve: 10,
+  pct_bucket_significativo: 20,
+  pct_bucket_grave: 10,
+  viajes_retraso_significativo: 3,
+  pct_retraso_significativo: 30,
+  suma_retraso_significativo_minutos: 95,
+  first_aggregated_date: "2026-07-31",
+  significant_delay_threshold_minutes: 15,
+  dia_semana_mas_probable: null,
+  franja_horaria_mas_probable: null,
+  tren_mas_probable: null,
+};
 
 describe("HorariosPage", () => {
   it("groups trains under Laborables/Sábado/Domingo, showing sentido, hora de salida y llegada", async () => {
@@ -82,5 +125,27 @@ describe("HorariosPage", () => {
     render(<HorariosPage />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
+  });
+
+  it("opens the train detail modal when the train code is clicked", async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/trains/schedule`, () =>
+        HttpResponse.json([
+          { cod_comercial: "04154", sentido: "Madrid", hora_salida: "06:56", hora_llegada_destino: "08:56", weekdays: [0, 1, 2, 3, 4] },
+        ]),
+      ),
+      http.get(`${API_BASE_URL}/metrics/trains`, () => HttpResponse.json(TRAIN_METRICS)),
+      http.get(`${API_BASE_URL}/metrics/global`, () => HttpResponse.json(GLOBAL_METRICS)),
+    );
+    const user = userEvent.setup();
+    render(<HorariosPage />);
+
+    await user.click(await screen.findByRole("button", { name: "04154" }));
+
+    expect(await screen.findByRole("dialog", { name: /04154/ })).toBeInTheDocument();
+    expect(screen.getByText(/desde 31 de julio de 2026/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cerrar" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

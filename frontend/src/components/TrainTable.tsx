@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { GlobalMetrics, RenfeTren, TrainMetrics, TrainRow, TrainSchedule } from "../types";
 import { CLAIM_THRESHOLD_MIN, delayStatus, formatDelay } from "../utils/trainFormat";
 import { MapPinIcon } from "./icons";
-import { TrainMapModal } from "./TrainMapModal";
+import { TrainLiveModal } from "./TrainLiveModal";
 import { TrainStatsModal } from "./TrainStatsModal";
 
 interface TrainTableProps {
@@ -54,7 +54,7 @@ export function TrainTable({
   return (
     <>
       <div className="table-card glass">
-        <div className="table-scroll">
+        <div className="table-scroll table-scroll--fixed-header">
           <table className="train-table">
             <thead>
               <tr>
@@ -148,7 +148,7 @@ export function TrainTable({
         </div>
       </div>
       {openModal?.kind === "mapa" && openRow && (
-        <TrainMapModal
+        <TrainLiveModal
           codComercial={openRow.codComercial}
           sentido={openRow.sentido}
           horaSalida={schedule.get(openRow.codComercial)?.hora_salida ?? null}
@@ -156,6 +156,10 @@ export function TrainTable({
           retrasoMinutos={openRow.retrasoMinutos}
           cancelado={openRow.cancelado}
           flota={flota}
+          schedule={schedule.get(openRow.codComercial)}
+          metrics={metrics.get(openRow.codComercial)}
+          firstAggregatedDate={globalMetrics?.first_aggregated_date}
+          thresholdMinutes={globalMetrics?.significant_delay_threshold_minutes}
           onClose={() => setOpenModal(null)}
         />
       )}

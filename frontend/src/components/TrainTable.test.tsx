@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { TrainTable } from "./TrainTable";
 import type { GlobalMetrics, RenfeTren, TrainMetrics, TrainRow, TrainSchedule } from "../types";
 
-vi.mock("./TrainMapModal", () => ({
-  TrainMapModal: ({ codComercial, onClose }: { codComercial: string; onClose: () => void }) => (
+vi.mock("./TrainLiveModal", () => ({
+  TrainLiveModal: ({ codComercial, onClose }: { codComercial: string; onClose: () => void }) => (
     <div role="dialog" aria-label={`mapa de ${codComercial}`}>
       <button type="button" onClick={onClose}>
         Cerrar
