@@ -8,6 +8,7 @@ from tests.dummies.reference_dates import MONDAY
 
 TZ = ZoneInfo("Europe/Madrid")
 NOW = datetime(MONDAY.year, MONDAY.month, MONDAY.day, 7, 30, tzinfo=TZ)
+TODAY = NOW.date()
 
 SCHEDULED = {
     "cod_comercial": "M100",
@@ -19,7 +20,7 @@ SCHEDULED = {
 
 class TestUpdateState(HandlerTestCase):
     def test_persists_expected_fields(self):
-        self.handler._update_state("M100", SCHEDULED, 5, NOW)
+        self.handler._update_state("M100", SCHEDULED, 5, TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["cod_comercial"], "M100")
@@ -33,32 +34,32 @@ class TestUpdateState(HandlerTestCase):
         self.assertNotIn("sk", item)
 
     def test_computes_hora_llegada_corregida_with_delay(self):
-        self.handler._update_state("M100", SCHEDULED, 15, NOW)
+        self.handler._update_state("M100", SCHEDULED, 15, TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_llegada_corregida"], "08:45")
 
     def test_capturado_en_zamora_flag_is_persisted(self):
-        self.handler._update_state("M100", SCHEDULED, 0, NOW, capturado_en_zamora=True)
+        self.handler._update_state("M100", SCHEDULED, 0, TODAY, NOW, capturado_en_zamora=True)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertTrue(item["capturado_en_zamora"])
 
     def test_overwrites_previous_item_for_same_train_and_day(self):
-        self.handler._update_state("M100", SCHEDULED, 5, NOW)
-        self.handler._update_state("M100", SCHEDULED, 20, NOW)
+        self.handler._update_state("M100", SCHEDULED, 5, TODAY, NOW)
+        self.handler._update_state("M100", SCHEDULED, 20, TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["ult_retraso"], 20)
 
     def test_hora_paso_zamora_absent_when_not_given(self):
-        self.handler._update_state("M100", SCHEDULED, 5, NOW)
+        self.handler._update_state("M100", SCHEDULED, 5, TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertNotIn("hora_paso_zamora", item)
 
     def test_hora_paso_zamora_persisted_when_given(self):
-        self.handler._update_state("M100", SCHEDULED, 5, NOW, hora_paso_zamora="07:03")
+        self.handler._update_state("M100", SCHEDULED, 5, TODAY, NOW, hora_paso_zamora="07:03")
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")
@@ -68,14 +69,14 @@ class TestUpdateState(HandlerTestCase):
         # que un valor fijado en un ciclo anterior desaparece si la siguiente
         # llamada no lo reenvía explícitamente. El caller es responsable de
         # releerlo del estado previo (ver _process_madrid_train).
-        self.handler._update_state("M100", SCHEDULED, 5, NOW, hora_paso_zamora="07:03")
-        self.handler._update_state("M100", SCHEDULED, 8, NOW)
+        self.handler._update_state("M100", SCHEDULED, 5, TODAY, NOW, hora_paso_zamora="07:03")
+        self.handler._update_state("M100", SCHEDULED, 8, TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertNotIn("hora_paso_zamora", item)
 
     def test_gps_position_absent_when_not_given(self):
-        self.handler._update_state("M100", SCHEDULED, 5, NOW)
+        self.handler._update_state("M100", SCHEDULED, 5, TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertNotIn("latitud", item)
@@ -83,7 +84,7 @@ class TestUpdateState(HandlerTestCase):
 
     def test_gps_position_persisted_when_given(self):
         self.handler._update_state(
-            "M100", SCHEDULED, 5, NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447")
+            "M100", SCHEDULED, 5, TODAY, NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447")
         )
 
         item = self.get_item("M100", NOW.date().isoformat())
@@ -92,9 +93,9 @@ class TestUpdateState(HandlerTestCase):
 
     def test_gps_position_dropped_by_put_item_when_omitted_on_a_later_call(self):
         self.handler._update_state(
-            "M100", SCHEDULED, 5, NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447")
+            "M100", SCHEDULED, 5, TODAY, NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447")
         )
-        self.handler._update_state("M100", SCHEDULED, 8, NOW)
+        self.handler._update_state("M100", SCHEDULED, 8, TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertNotIn("latitud", item)

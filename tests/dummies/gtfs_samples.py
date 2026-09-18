@@ -87,7 +87,7 @@ def to_zip_bytes(files: dict = GTFS_FILES) -> bytes:
     """
     import io
     import zipfile
-
+    #TODO: Mockear el zip de GTSF aqui
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         for name, content in files.items():

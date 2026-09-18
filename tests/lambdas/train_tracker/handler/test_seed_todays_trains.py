@@ -8,6 +8,7 @@ from tests.dummies.reference_dates import MONDAY
 
 TZ = ZoneInfo("Europe/Madrid")
 NOW = datetime(MONDAY.year, MONDAY.month, MONDAY.day, 5, 0, tzinfo=TZ)
+TODAY = NOW.date()
 
 TRAINS_TODAY = [
     {
@@ -29,13 +30,13 @@ class TestSeedTodaysTrains(HandlerTestCase):
     """
 
     def test_seeds_placeholder_for_each_train_received(self):
-        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(TODAY, NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         self.assertIsNotNone(self.get_item("M100", "2026-01-05"))
         self.assertIsNotNone(self.get_item("G100", "2026-01-05"))
 
     def test_placeholder_shape(self):
-        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(TODAY, NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", "2026-01-05")
         self.assertEqual(item["sentido"], "Madrid")
@@ -47,13 +48,13 @@ class TestSeedTodaysTrains(HandlerTestCase):
         self.assertIn("ttl", item)
 
     def test_creates_seed_marker(self):
-        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(TODAY, NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         marker = self.table.get_item(Key={"pk": "SEED#2026-01-05"}).get("Item")
         self.assertIsNotNone(marker)
 
     def test_second_call_is_a_noop(self):
-        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(TODAY, NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
         # Simula progreso real tras el primer sembrado.
         self.table.update_item(
             Key={"pk": f"M100#2026-01-05"},
@@ -61,7 +62,7 @@ class TestSeedTodaysTrains(HandlerTestCase):
             ExpressionAttributeValues={":v": 12},
         )
 
-        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(TODAY, NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", "2026-01-05")
         self.assertEqual(item["ult_retraso"], 12)  # no se ha vuelto a pisar con el placeholder
@@ -71,7 +72,7 @@ class TestSeedTodaysTrains(HandlerTestCase):
         # marcador aún no se ha escrito, el PutItem condicional no debe pisarlo.
         self.table.put_item(Item={"pk": "M100#2026-01-05", "entregado": True, "ult_retraso": 99})
 
-        self.handler._seed_todays_trains(NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
+        self.handler._seed_todays_trains(TODAY, NOW, TRAINS_TODAY, SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", "2026-01-05")
         self.assertTrue(item["entregado"])

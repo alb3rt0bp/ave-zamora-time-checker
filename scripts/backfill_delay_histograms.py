@@ -18,7 +18,7 @@ nuevos, porque esos días están igualmente en S3 y entran en el recálculo.
 El resto de contadores del item (los 4 tramos, last_aggregated_date...) no
 se tocan.
 
-Conviene no lanzarlo justo a las 00:15 (hora de daily_dump_handler): si el
+Conviene no lanzarlo justo a las 02:15 (hora de daily_dump_handler): si el
 volcado del día escribe entre la lectura de S3 y la escritura en DynamoDB,
 ese día quedaría fuera del histograma hasta la siguiente ejecución.
 

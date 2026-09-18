@@ -14,6 +14,7 @@ from tests.dummies.renfe_samples import (
 
 TZ = ZoneInfo("Europe/Madrid")
 NOW = datetime(MONDAY.year, MONDAY.month, MONDAY.day, 8, 10, tzinfo=TZ)
+TODAY = NOW.date()
 
 GALICIA_SCHEDULED = {
     "cod_comercial": "G100",
@@ -33,7 +34,7 @@ MADRID_SCHEDULED = {
 class TestProcessTrain(HandlerTestCase):
     def test_dispatches_madrid_trains_to_process_madrid_train(self):
         # live=None y sin estado previo → rama exclusiva de _process_madrid_train.
-        result = self.handler._process_train(MADRID_SCHEDULED, None, NOW, SAMPLE_LOG_EXTRA)
+        result = self.handler._process_train(MADRID_SCHEDULED, None, TODAY, NOW, SAMPLE_LOG_EXTRA)
         self.assertFalse(result)
 
     def test_galicia_entregado_short_circuits(self):
@@ -41,16 +42,16 @@ class TestProcessTrain(HandlerTestCase):
             Item={"pk": f"G100#{NOW.date().isoformat()}", "entregado": True}
         )
 
-        result = self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, NOW, SAMPLE_LOG_EXTRA)
+        result = self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, TODAY, NOW, SAMPLE_LOG_EXTRA)
 
         self.assertFalse(result)
 
     def test_galicia_live_none_returns_false(self):
-        result = self.handler._process_train(GALICIA_SCHEDULED, None, NOW, SAMPLE_LOG_EXTRA)
+        result = self.handler._process_train(GALICIA_SCHEDULED, None, TODAY, NOW, SAMPLE_LOG_EXTRA)
         self.assertFalse(result)
 
     def test_galicia_not_yet_at_zamora_updates_state(self):
-        result = self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_RUTA, NOW, SAMPLE_LOG_EXTRA)
+        result = self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_RUTA, TODAY, NOW, SAMPLE_LOG_EXTRA)
 
         self.assertFalse(result)
         item = self.get_item("G100", NOW.date().isoformat())
@@ -61,7 +62,7 @@ class TestProcessTrain(HandlerTestCase):
         self.assertEqual(float(item["longitud"]), TRAIN_G100_EN_RUTA["longitud"])
 
     def test_galicia_arrival_at_zamora_marks_entregado(self):
-        result = self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, NOW, SAMPLE_LOG_EXTRA)
+        result = self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, TODAY, NOW, SAMPLE_LOG_EXTRA)
 
         self.assertTrue(result)
         item = self.get_item("G100", NOW.date().isoformat())
@@ -79,12 +80,12 @@ class TestProcessTrain(HandlerTestCase):
 
     def test_galicia_arrival_with_low_delay_does_not_publish_alert(self):
         # TRAIN_G100_EN_ZAMORA trae ultRetraso=4, por debajo del umbral (15).
-        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, NOW, SAMPLE_LOG_EXTRA)
+        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, TODAY, NOW, SAMPLE_LOG_EXTRA)
 
         self.assertEqual(self.get_published_delay_alerts(), [])
 
     def test_galicia_arrival_with_high_delay_publishes_alert(self):
-        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA_CON_RETRASO, NOW, SAMPLE_LOG_EXTRA)
+        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA_CON_RETRASO, TODAY, NOW, SAMPLE_LOG_EXTRA)
 
         [alert] = self.get_published_delay_alerts()
         self.assertEqual(alert["cod_comercial"], "G100")
@@ -96,7 +97,7 @@ class TestProcessTrain(HandlerTestCase):
         # -> retraso corregido = -80 min, así que hora_llegada_corregida/hora_paso_zamora
         # deben reflejar la hora actual (08:10), no la fabricada a partir del dato corrupto.
         result = self.handler._process_train(
-            GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA_CON_RETRASO_NEGATIVO_ANOMALO, NOW, SAMPLE_LOG_EXTRA
+            GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA_CON_RETRASO_NEGATIVO_ANOMALO, TODAY, NOW, SAMPLE_LOG_EXTRA
         )
 
         self.assertTrue(result)
@@ -114,10 +115,10 @@ class TestProcessTrain(HandlerTestCase):
         # _update_state); en el ciclo en que se captura el paso por Zamora el
         # retraso real de Renfe ha subido a 4. El item final debe reflejar el
         # retraso de ESTE ciclo (4), no el desfasado del ciclo anterior (2).
-        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_RUTA, NOW, SAMPLE_LOG_EXTRA)
+        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_RUTA, TODAY, NOW, SAMPLE_LOG_EXTRA)
         self.assertEqual(self.get_item("G100", NOW.date().isoformat())["ult_retraso"], TRAIN_G100_EN_RUTA["ultRetraso"])
 
-        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, NOW, SAMPLE_LOG_EXTRA)
+        self.handler._process_train(GALICIA_SCHEDULED, TRAIN_G100_EN_ZAMORA, TODAY, NOW, SAMPLE_LOG_EXTRA)
 
         item = self.get_item("G100", NOW.date().isoformat())
         self.assertEqual(item["ult_retraso"], TRAIN_G100_EN_ZAMORA["ultRetraso"])

@@ -27,26 +27,40 @@ lambda_handler se ejecuta cada 5 minutos por EventBridge Scheduler:
    se resuelven igualmente con los últimos datos conocidos
    (_resolve_expired_madrid_trains).
 
-daily_dump_handler se ejecuta una vez al día a las 00:15 (hora de Madrid),
-poco después de medianoche: vuelca a un único fichero JSONL en S3 todos los
-trenes programados el día que acaba de terminar (sembrados por
-_seed_todays_trains), leyendo su estado en DynamoDB (cuyo TTL no expira
-hasta las 00:30, dejando margen de sobra). Los trenes que nunca se marcaron
-'entregado' (nunca detectados en flotaLD.json — p. ej. cancelación por
-huelga) se vuelcan igualmente, marcados con 'cancelado': true y
-'minutos_retraso': null, para que consten en la observabilidad sin
-contaminar medias/estadísticas de retraso (NULL se ignora en AVG() y
-similares). El estado de cada tren vive en DynamoDB hasta el volcado diario,
-para minimizar el número de objetos que Athena tiene que leer (sin capa
-gratuita de consultas) — la única escritura a S3 durante el polling es la
-caché del horario del día (schedules/{fecha}.json, una vez al día).
+El polling "normal" (pasos 0-5) para a las 23:59 (EventBridge Scheduler, ver
+infrastructure/template.yaml), pero un tren muy retrasado puede seguir en
+ruta después de esa hora. Por eso hay un tramo extra de polling de madrugada
+[00:00, NIGHT_TAIL_WINDOW_HOURS) — 2 horas por defecto — que sigue
+perteneciendo operativamente al día que acaba de terminar (ver
+_operational_date): en ese tramo no se recalculan ventanas de apertura
+(_get_pending_trains sustituye a ScheduleMatcher.get_active_trains), solo se
+sigue intentando cualquier tren de ese día aún no marcado 'entregado'.
+_schedule_datetime ancla las horas programadas al día OPERATIVO (no al día
+calendario de "ahora"), para que las comparaciones de cierre de ventana
+sigan siendo correctas cruzando medianoche.
+
+daily_dump_handler se ejecuta una vez al día a las 02:15 (hora de Madrid),
+después de que termine el tramo de madrugada: vuelca a un único fichero
+JSONL en S3 todos los trenes programados el día que acaba de terminar
+(sembrados por _seed_todays_trains), leyendo su estado en DynamoDB (cuyo TTL
+no expira hasta las 02:30, dejando margen de sobra). Los trenes que nunca se
+marcaron 'entregado' (nunca detectados en flotaLD.json en todo el día,
+madrugada incluida — p. ej. cancelación por huelga) se vuelcan igualmente,
+marcados con 'cancelado': true y 'minutos_retraso': null, para que consten
+en la observabilidad sin contaminar medias/estadísticas de retraso (NULL se
+ignora en AVG() y similares). El estado de cada tren vive en DynamoDB hasta
+el volcado diario, para minimizar el número de objetos que Athena tiene que
+leer (sin capa gratuita de consultas) — la única escritura a S3 durante el
+polling es la caché del horario del día (schedules/{fecha}.json, una vez al
+día).
 """
 
 import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import boto3
 
@@ -84,6 +98,15 @@ DATA_QUALITY_ALERT_SNS_TOPIC_ARN = os.environ.get("DATA_QUALITY_ALERT_SNS_TOPIC_
 NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES = int(
     os.environ.get("NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES", "-10")
 )
+# El polling normal para en 23:59 (ver EventBridge Scheduler en
+# infrastructure/template.yaml). Un tren muy retrasado puede seguir en ruta
+# después de esa hora (motivo: un tren llegó a las 23:26 y casi se sale de
+# margen), así que se añade un tramo extra de polling de madrugada
+# [00:00, NIGHT_TAIL_WINDOW_HOURS) que sigue perteneciendo operativamente al
+# día que acaba de terminar (ver _operational_date) — debe coincidir con la
+# regla "ScheduleNightTail" del template y con TTL/volcado diario, que dejan
+# NIGHT_TAIL_WINDOW_HOURS:30 / NIGHT_TAIL_WINDOW_HOURS:15 de margen tras él.
+NIGHT_TAIL_WINDOW_HOURS = int(os.environ.get("NIGHT_TAIL_WINDOW_HOURS", "2"))
 
 # ── Clientes AWS ──────────────────────────────────────────────────────────────
 dynamodb = boto3.resource("dynamodb")
@@ -101,6 +124,53 @@ state_table = dynamodb.Table(DYNAMODB_TABLE)
 metrics_table = dynamodb.Table(DYNAMODB_METRICS_TABLE)
 
 
+def _operational_date(now_local: datetime) -> date:
+    """
+    El día OPERATIVO de un ciclo de polling: coincide con el día calendario
+    salvo en el tramo de madrugada [00:00, NIGHT_TAIL_WINDOW_HOURS) hora de
+    Madrid, que sigue perteneciendo al día que acaba de terminar — ese tramo
+    de polling extra existe precisamente para seguir comprobando trenes
+    todavía en ruta cuando el último ciclo "normal" (23:59) los dejó sin
+    resolver. Todo el estado en DynamoDB (pk, TTL) se indexa por este día
+    operativo, no por now_local.date().
+    """
+    if now_local.hour < NIGHT_TAIL_WINDOW_HOURS:
+        return now_local.date() - timedelta(days=1)
+    return now_local.date()
+
+
+def _schedule_datetime(today: date, hhmm: str, tzinfo) -> datetime:
+    """
+    Construye un datetime absoluto para "HH:MM" anclado en `today` (el día
+    OPERATIVO — ver _operational_date), no en now_local.date(). Reemplaza los
+    usos de now_local.replace(hour=..., minute=...): durante el tramo de
+    madrugada, now_local ya está en el día calendario siguiente, así que
+    anclar ahí daría una hora programada equivocada (un día adelantada) y
+    rompería las comparaciones de cierre de ventana.
+    """
+    h, m = map(int, hhmm.split(":"))
+    return datetime(today.year, today.month, today.day, h, m, tzinfo=tzinfo)
+
+
+def _get_pending_trains(today: date, trains_today: list[dict], log_extra: dict) -> list[dict]:
+    """
+    trains_today que todavía no están marcados 'entregado' en DynamoDB para
+    `today`. Se usa en el tramo de madrugada en vez de
+    ScheduleMatcher.get_active_trains: ese cálculo de ventana está pensado
+    para el horario normal (now_local y las horas programadas en el mismo
+    día calendario) y no para "sigue abierto desde ayer" — aquí basta con
+    seguir intentando cualquier tren que aún no se haya resuelto, sin
+    recalcular ventanas de apertura que ya no aplican a estas horas.
+    """
+    pending = []
+    for train in trains_today:
+        state = _get_state(train["cod_comercial"], today)
+        if state and state.get("entregado"):
+            continue
+        pending.append(train)
+    return pending
+
+
 def lambda_handler(event, context):
     """Punto de entrada de la Lambda de polling (cada 5 min)."""
     log_extra = {
@@ -113,16 +183,24 @@ def lambda_handler(event, context):
     now_utc = datetime.now(timezone.utc)
     # Renfe opera en hora peninsular española (UTC+1 / UTC+2)
     # Usamos la hora local para comparar con los horarios de paso
-    from zoneinfo import ZoneInfo
     now_local = now_utc.astimezone(ZoneInfo("Europe/Madrid"))
+    today = _operational_date(now_local)
+    night_tail = today != now_local.date()
 
-    logger.info("Ejecución iniciada: %s (local: %s)", now_utc.isoformat(), now_local.isoformat(), extra=log_extra)
+    logger.info(
+        "Ejecución iniciada: %s (local: %s, día operativo: %s%s)",
+        now_utc.isoformat(), now_local.isoformat(), today.isoformat(),
+        " — tramo de madrugada" if night_tail else "",
+        extra=log_extra,
+    )
 
-    # 0. Horario de hoy: caché en S3 → GTFS (y cachear) → fallback estático.
-    # Tanto el sembrado como las ventanas de polling de todo el día se
-    # calculan sobre este mismo resultado (ver schedule_resolver.py).
+    # 0. Horario del día operativo: caché en S3 → GTFS (y cachear) → fallback
+    # estático. Tanto el sembrado como las ventanas de polling se calculan
+    # sobre este mismo resultado (ver schedule_resolver.py). En el tramo de
+    # madrugada esto relee la caché ya escrita durante el día que termina
+    # (today = ayer), nunca vuelve a descargar GTFS para "hoy".
     todays_schedule = resolve_todays_schedule(
-        s3, S3_BUCKET, now_local.date(), ZAMORA_CODE, CHAMARTIN_CODE,
+        s3, S3_BUCKET, today, ZAMORA_CODE, CHAMARTIN_CODE,
         static_schedule_fallback,
         lambda msg: _publish_schedule_fallback_alert(msg, log_extra),
         log_extra,
@@ -130,16 +208,29 @@ def lambda_handler(event, context):
     trains_today = todays_schedule["trains"]
     matcher = ScheduleMatcher(todays_schedule, log_extra)
 
-    # Primer ciclo del día: sembrar en DynamoDB un placeholder por cada tren
-    # programado hoy, para que el listado esté disponible desde ya.
-    _seed_todays_trains(now_local, trains_today, log_extra)
+    # Primer ciclo del día operativo: sembrar en DynamoDB un placeholder por
+    # cada tren programado, para que el listado esté disponible desde ya.
+    # Idempotente vía el marcador SEED#{today}: en el tramo de madrugada
+    # today sigue siendo ayer, así que esto no hace nada (ya se sembró a las
+    # 07:00 de ayer).
+    _seed_todays_trains(today, now_local, trains_today, log_extra)
 
-    # 1. ¿Qué trenes tienen ventana activa ahora? Para Madrid, el cierre de
-    # ventana depende del último retraso conocido en DynamoDB.
-    active_trains = matcher.get_active_trains(
-        now_local, state_lookup=lambda cod: _get_state(cod, now_local)
-    )
-    logger.debug("Trenes en ventana activa: %s", [t["cod_comercial"] for t in active_trains], extra=log_extra)
+    if night_tail:
+        # Tramo de madrugada: no se recalculan ventanas de apertura (ya no
+        # aplican a estas horas), se sigue intentando cualquier tren de ayer
+        # que aún no se haya resuelto.
+        active_trains = _get_pending_trains(today, trains_today, log_extra)
+        logger.debug(
+            "Tramo de madrugada: %d trenes de %s aún pendientes",
+            len(active_trains), today.isoformat(), extra=log_extra,
+        )
+    else:
+        # 1. ¿Qué trenes tienen ventana activa ahora? Para Madrid, el cierre
+        # de ventana depende del último retraso conocido en DynamoDB.
+        active_trains = matcher.get_active_trains(
+            now_local, state_lookup=lambda cod: _get_state(cod, today)
+        )
+        logger.debug("Trenes en ventana activa: %s", [t["cod_comercial"] for t in active_trains], extra=log_extra)
 
     processed = 0
 
@@ -170,7 +261,7 @@ def lambda_handler(event, context):
                     cod, train_data.get("latitud"), train_data.get("longitud"), train_data.get("codEstAnt"),
                     extra=log_extra,
                 )
-            if _process_train(scheduled_train, train_data, now_local, log_extra):
+            if _process_train(scheduled_train, train_data, today, now_local, log_extra):
                 processed += 1
     else:
         logger.info("No hay trenes en ventana activa.", extra=log_extra)
@@ -178,7 +269,7 @@ def lambda_handler(event, context):
     # 3. Trenes Madrid cuya ventana ya cerró sin haber sido detectados como
     # llegados (ni Chamartín ni desaparición) → resolver con últimos datos
     # conocidos para no perder el dato de puntualidad de ese día.
-    resolved = _resolve_expired_madrid_trains(now_local, trains_today, log_extra)
+    resolved = _resolve_expired_madrid_trains(today, now_local, trains_today, log_extra)
     processed += resolved
 
     logger.info(
@@ -189,33 +280,36 @@ def lambda_handler(event, context):
     return {"statusCode": 200, "active": len(active_trains), "recorded": processed}
 
 
-def _seed_todays_trains(now_local: datetime, trains_today: list[dict], log_extra: dict) -> None:
+def _seed_todays_trains(today: date, now_local: datetime, trains_today: list[dict], log_extra: dict) -> None:
     """
     Siembra en DynamoDB un placeholder ('entregado': False, sin datos de
-    Renfe todavía) para cada tren de trains_today (ya resuelto para hoy por
-    schedule_resolver.py — GTFS o fallback estático), si no se ha hecho ya.
-    Así el listado de trenes del día está disponible desde el primer ciclo,
-    en vez de ir apareciendo poco a poco a medida que cada tren se procesa.
+    Renfe todavía) para cada tren de trains_today (ya resuelto para `today`
+    por schedule_resolver.py — GTFS o fallback estático), si no se ha hecho
+    ya. Así el listado de trenes del día está disponible desde el primer
+    ciclo, en vez de ir apareciendo poco a poco a medida que cada tren se
+    procesa.
 
     Usa un item marcador (pk="SEED#{fecha}") para no repetir el sembrado en
     cada ciclo de 5 min; cada PutItem individual lleva además una condición
-    defensiva por si dos ejecuciones se solapasen.
+    defensiva por si dos ejecuciones se solapasen. En el tramo de madrugada
+    (ver _operational_date) `today` sigue siendo el día que acaba de
+    terminar, así que este marcador ya existe y la función no hace nada.
     """
-    today = now_local.date().isoformat()
-    seed_marker_pk = f"SEED#{today}"
+    today_iso = today.isoformat()
+    seed_marker_pk = f"SEED#{today_iso}"
 
     marker = state_table.get_item(Key={"pk": seed_marker_pk}).get("Item")
     if marker:
         return
 
-    ttl = _end_of_day_ttl(now_local)
+    ttl = _end_of_day_ttl(today)
     seeded = 0
 
     for train in trains_today:
         try:
             state_table.put_item(
                 Item={
-                    "pk": f"{train['cod_comercial']}#{today}",
+                    "pk": f"{train['cod_comercial']}#{today_iso}",
                     "cod_comercial": train["cod_comercial"],
                     "sentido": train["sentido"],
                     "tipo_dia": train["tipo_dia"],
@@ -233,7 +327,7 @@ def _seed_todays_trains(now_local: datetime, trains_today: list[dict], log_extra
             pass  # ya existía (p. ej. ejecuciones solapadas); no se sobrescribe
 
     state_table.put_item(Item={"pk": seed_marker_pk, "ttl": ttl})
-    logger.info("Sembrados %d trenes de hoy (%s) en DynamoDB", seeded, today, extra=log_extra)
+    logger.info("Sembrados %d trenes de hoy (%s) en DynamoDB", seeded, today_iso, extra=log_extra)
 
 
 def _fetch_gtfsrt_entities(log_extra: dict) -> list[dict]:
@@ -296,7 +390,7 @@ def _to_decimal(value) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
 
-def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_extra: dict) -> bool:
+def _process_train(scheduled: dict, live: dict | None, today: date, now_local: datetime, log_extra: dict) -> bool:
     """
     Decide si procede marcar el tren como entregado.
 
@@ -307,15 +401,19 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
       (`codEstAnt == ZAMORA_CODE`).
 
     Devuelve True si el tren se marcó como entregado en DynamoDB.
+
+    `today` es el día OPERATIVO (ver _operational_date), usado para el pk en
+    DynamoDB; `now_local` es el instante real, usado para timestamps y para
+    anclar las horas programadas vía _schedule_datetime.
     """
     cod = scheduled["cod_comercial"]
 
     if scheduled["sentido"] == "Madrid":
-        return _process_madrid_train(scheduled, live, now_local, log_extra)
+        return _process_madrid_train(scheduled, live, today, now_local, log_extra)
 
     # ── Sentido Galicia: grabar al pasar por Zamora, ventana sin cierre por
     # tiempo (se sigue intentando hasta capturarlo) ──────────────────────────
-    state = _get_state(cod, now_local)
+    state = _get_state(cod, today)
     if state and state.get("entregado"):
         return False
 
@@ -326,7 +424,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
     ult_retraso = _sanitize_retraso(
-        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], now_local, log_extra
+        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], today, now_local, log_extra
     )
     latitud = _to_decimal(live.get("latitud"))
     longitud = _to_decimal(live.get("longitud"))
@@ -343,7 +441,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
 
         gtfsrt_fields = _enrich_with_gtfsrt(cod, "Galicia", ZAMORA_CODE, log_extra)
         _mark_done(
-            cod, now_local,
+            cod, today, now_local,
             hora_llegada_corregida=hora_llegada_corregida,
             hora_paso_zamora=hora_llegada_corregida,
             capturado_en_zamora=True,
@@ -352,12 +450,12 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
             longitud=longitud,
             **gtfsrt_fields,
         )
-        _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, now_local, log_extra)
+        _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, today, now_local, log_extra)
         logger.info("✅ Tren %s (Galicia) entregado, retraso=%d min", cod, ult_retraso, extra=log_extra)
         return True
 
     # ── Todavía no ha llegado: actualizar estado en DynamoDB ─────────────────
-    _update_state(cod, scheduled, ult_retraso, now_local, latitud=latitud, longitud=longitud)
+    _update_state(cod, scheduled, ult_retraso, today, now_local, latitud=latitud, longitud=longitud)
     logger.info(
         "Tren %s aún no en Zamora (última est: %s, retraso: %d min)",
         cod, cod_est_ant, ult_retraso,
@@ -366,7 +464,7 @@ def _process_train(scheduled: dict, live: dict | None, now_local: datetime, log_
     return False
 
 
-def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetime, log_extra: dict) -> bool:
+def _process_madrid_train(scheduled: dict, live: dict | None, today: date, now_local: datetime, log_extra: dict) -> bool:
     """
     Lógica específica para trenes con sentido Madrid: el evento se graba cuando
     el tren ha llegado a Madrid Chamartín.
@@ -378,10 +476,12 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
       2. `codEstAnt == CHAMARTIN_CODE`.
 
     Si la ventana se cierra sin ninguna de las dos detecciones, se resuelve
-    aparte en _resolve_expired_madrid_trains().
+    aparte en _resolve_expired_madrid_trains(). `today` (día operativo) ancla
+    hora_llegada_programada vía _schedule_datetime — necesario en el tramo de
+    madrugada, donde now_local ya está en el día calendario siguiente.
     """
     cod   = scheduled["cod_comercial"]
-    state = _get_state(cod, now_local)
+    state = _get_state(cod, today)
 
     # Ya grabado en una ejecución previa → no duplicar.
     if state and state.get("entregado"):
@@ -402,8 +502,9 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
                 )
                 return False
 
-            h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
-            hora_llegada_programada = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+            hora_llegada_programada = _schedule_datetime(
+                today, scheduled["hora_llegada_destino"], now_local.tzinfo
+            )
             ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
             inicio_reintentos = hora_llegada_programada + timedelta(minutes=ult_retraso_conocido)
 
@@ -425,9 +526,9 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
             # No hay datos en vivo; el estado conocido ya tiene ult_retraso y
             # hora_llegada_corregida correctos de la última _update_state.
             gtfsrt_fields = _enrich_with_gtfsrt(cod, "Madrid", CHAMARTIN_CODE, log_extra)
-            _mark_done(cod, now_local, **gtfsrt_fields)
+            _mark_done(cod, today, now_local, **gtfsrt_fields)
             _maybe_publish_delay_alert(
-                scheduled, ult_retraso_conocido, state.get("hora_llegada_corregida"), now_local, log_extra
+                scheduled, ult_retraso_conocido, state.get("hora_llegada_corregida"), today, now_local, log_extra
             )
             logger.info(
                 "Tren %s (Madrid) desaparecido de la flota tras ser visto → "
@@ -443,7 +544,7 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
     ult_retraso = _sanitize_retraso(
-        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], now_local, log_extra
+        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], today, now_local, log_extra
     )
     latitud = _to_decimal(live.get("latitud"))
     longitud = _to_decimal(live.get("longitud"))
@@ -462,7 +563,7 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
 
         gtfsrt_fields = _enrich_with_gtfsrt(cod, "Madrid", CHAMARTIN_CODE, log_extra)
         _mark_done(
-            cod, now_local,
+            cod, today, now_local,
             hora_llegada_corregida=hora_llegada_corregida,
             capturado_en_zamora=capturado_en_zamora,
             ult_retraso=ult_retraso,
@@ -470,7 +571,7 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
             longitud=longitud,
             **gtfsrt_fields,
         )
-        _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, now_local, log_extra)
+        _maybe_publish_delay_alert(scheduled, ult_retraso, hora_llegada_corregida, today, now_local, log_extra)
         logger.info("Tren %s ha llegado a Chamartín (codEstAnt=%s)", cod, cod_est_ant, extra=log_extra)
         return True
 
@@ -496,7 +597,7 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
         hora_paso_zamora = None
 
     _update_state(
-        cod, scheduled, ult_retraso, now_local,
+        cod, scheduled, ult_retraso, today, now_local,
         capturado_en_zamora=capturado_en_zamora,
         hora_paso_zamora=hora_paso_zamora,
         latitud=latitud,
@@ -509,36 +610,39 @@ def _process_madrid_train(scheduled: dict, live: dict | None, now_local: datetim
     return False
 
 
-def _get_state(cod: str, now_local: datetime) -> dict | None:
+def _get_state(cod: str, today: date) -> dict | None:
     """Recupera el estado transitorio del tren en DynamoDB (o None si no existe)."""
     resp = state_table.get_item(
-        Key={"pk": f"{cod}#{now_local.date().isoformat()}"}
+        Key={"pk": f"{cod}#{today.isoformat()}"}
     )
     return resp.get("Item")
 
 
-def _end_of_day_ttl(now_local: datetime) -> int:
+def _end_of_day_ttl(today: date) -> int:
     """
-    TTL en epoch seconds: 00:30 del día siguiente (hora local). Se deja un
-    margen tras la medianoche (en vez de expirar justo a las 23:59:59) para
-    que daily_dump_handler pueda leer los datos del día con seguridad antes
-    de que el barrido de TTL de DynamoDB (best-effort, no instantáneo) los
-    elimine — el último ciclo de polling llega hasta las 23:59.
+    TTL en epoch seconds: NIGHT_TAIL_WINDOW_HOURS:30 del día siguiente a
+    `today` (hora local) — p. ej. 02:30 con el valor por defecto de 2 horas.
+    Se deja un margen de 30 min tras el final del tramo de polling de
+    madrugada (ver _operational_date/NIGHT_TAIL_WINDOW_HOURS) para que
+    daily_dump_handler pueda leer los datos del día con seguridad antes de
+    que el barrido de TTL de DynamoDB (best-effort, no instantáneo) los
+    elimine.
     """
-    next_day = now_local.date() + timedelta(days=1)
-    cutoff = now_local.replace(
-        year=next_day.year, month=next_day.month, day=next_day.day,
-        hour=0, minute=30, second=0, microsecond=0,
+    next_day = today + timedelta(days=1)
+    cutoff = datetime(
+        next_day.year, next_day.month, next_day.day,
+        hour=NIGHT_TAIL_WINDOW_HOURS, minute=30, second=0, microsecond=0,
+        tzinfo=ZoneInfo("Europe/Madrid"),
     )
     return int(cutoff.timestamp())
 
 
-def _update_state(cod: str, scheduled: dict, retraso: int,
+def _update_state(cod: str, scheduled: dict, retraso: int, today: date,
                   now_local: datetime, capturado_en_zamora: bool = False,
                   hora_paso_zamora: str | None = None,
                   latitud: str | None = None, longitud: str | None = None):
-    """Persiste el estado transitorio del tren en DynamoDB."""
-    ttl = _end_of_day_ttl(now_local)  # expira a las 23:59:59 del mismo día
+    """Persiste el estado transitorio del tren en DynamoDB (pk indexado por `today`, el día operativo)."""
+    ttl = _end_of_day_ttl(today)
 
     h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
     hora_llegada_corregida = (
@@ -546,7 +650,7 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
     ).strftime("%H:%M")
 
     item = {
-        "pk":          f"{cod}#{now_local.date().isoformat()}",
+        "pk":          f"{cod}#{today.isoformat()}",
         "cod_comercial": cod,
         "sentido":     scheduled["sentido"],
         "tipo_dia":    scheduled["tipo_dia"],
@@ -571,17 +675,17 @@ def _update_state(cod: str, scheduled: dict, retraso: int,
     state_table.put_item(Item=item)
 
 
-def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None = None,
+def _mark_done(cod: str, today: date, now_local: datetime, hora_llegada_corregida: str | None = None,
                capturado_en_zamora: bool | None = None, ult_retraso: int | None = None,
                hora_paso_zamora: str | None = None, minutos_retraso_gtfsrt: int | None = None,
                hora_llegada_gtfsrt: str | None = None, hora_paso_zamora_gtfsrt: str | None = None,
                latitud: str | None = None, longitud: str | None = None):
-    """Marca el tren como entregado (procesado) para hoy."""
+    """Marca el tren como entregado (procesado) para `today` (día operativo)."""
     # "ttl" es palabra reservada en DynamoDB → hay que usar un alias (#ttl).
     # Se fija siempre aquí, ya que este item puede no haber pasado nunca por
     # _update_state (p. ej. llegada detectada en el primer poll del tren).
     set_parts = ["entregado = :entregado", "#ttl = :ttl"]
-    values = {":entregado": True, ":ttl": _end_of_day_ttl(now_local)}
+    values = {":entregado": True, ":ttl": _end_of_day_ttl(today)}
     names = {"#ttl": "ttl"}
 
     if hora_llegada_corregida is not None:
@@ -625,7 +729,7 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None
         values[":longitud"] = longitud
 
     state_table.update_item(
-        Key={"pk": f"{cod}#{now_local.date().isoformat()}"},
+        Key={"pk": f"{cod}#{today.isoformat()}"},
         UpdateExpression="SET " + ", ".join(set_parts),
         ExpressionAttributeNames=names,
         ExpressionAttributeValues=values,
@@ -634,7 +738,7 @@ def _mark_done(cod: str, now_local: datetime, hora_llegada_corregida: str | None
 
 def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
                                 hora_llegada_corregida: str | None,
-                                now_local: datetime, log_extra: dict) -> None:
+                                today: date, now_local: datetime, log_extra: dict) -> None:
     """
     Publica un evento en SNS cuando un tren se acaba de marcar entregado con
     más de DELAY_ALERT_THRESHOLD_MINUTES minutos de retraso, para que
@@ -661,7 +765,7 @@ def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
                 "hora_programada": scheduled["hora_llegada_destino"],
                 "hora_llegada_corregida": hora_llegada_corregida,
                 "minutos_retraso": ult_retraso,
-                "fecha": now_local.date().isoformat(),
+                "fecha": today.isoformat(),
                 "es_tren_madrugador": es_tren_madrugador,
             }),
         )
@@ -677,7 +781,7 @@ def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
 
 
 def _sanitize_retraso(cod: str, sentido: str, ult_retraso: int, hora_referencia: str,
-                       now_local: datetime, log_extra: dict) -> int:
+                       today: date, now_local: datetime, log_extra: dict) -> int:
     """
     Renfe ha reportado alguna vez un ultRetraso disparatado (p. ej. -562 min
     en flotaLD.json) — un fallo puntual de su servicio, no un tren circulando
@@ -686,13 +790,14 @@ def _sanitize_retraso(cod: str, sentido: str, ult_retraso: int, hora_referencia:
     comparando la hora programada de referencia (hora_llegada_destino) con la
     hora actual, y se avisa por email para poder revisarlo. La corrección se
     propaga automáticamente a hora_llegada_corregida/hora_paso_zamora, que se
-    calculan a partir de este mismo valor.
+    calculan a partir de este mismo valor. `today` (día operativo) ancla esa
+    hora programada vía _schedule_datetime — imprescindible en el tramo de
+    madrugada, donde now_local ya está en el día calendario siguiente.
     """
     if ult_retraso >= NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES:
         return ult_retraso
 
-    h, m = map(int, hora_referencia.split(":"))
-    hora_programada = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+    hora_programada = _schedule_datetime(today, hora_referencia, now_local.tzinfo)
     retraso_corregido = round((now_local - hora_programada).total_seconds() / 60)
 
     logger.warning(
@@ -763,13 +868,17 @@ def _publish_schedule_fallback_alert(message: str, log_extra: dict) -> None:
         logger.error("Error publicando alerta de fallback de horario del día: %s", exc, extra=log_extra)
 
 
-def _resolve_expired_madrid_trains(now_local: datetime, trains_today: list[dict], log_extra: dict) -> int:
+def _resolve_expired_madrid_trains(today: date, now_local: datetime, trains_today: list[dict], log_extra: dict) -> int:
     """
     Recorre los trenes Madrid con estado pendiente en DynamoDB (no 'entregado')
     cuya ventana (hora_llegada_destino + último retraso conocido + 10 min)
     ya se ha cerrado sin haber sido detectados como llegados (ni Chamartín ni
     desaparición), y los marca igualmente como entregados con los últimos
     datos conocidos para no perder el dato de puntualidad de ese tren ese día.
+    `today` (día operativo) ancla hora_llegada_programada vía
+    _schedule_datetime, para que la comparación siga siendo correcta durante
+    el tramo de madrugada (ver _operational_date), cuando un tren con mucho
+    retraso puede cerrar su ventana ya en el día calendario siguiente.
 
     Excepción: si el tren nunca se llegó a ver en flotaLD.json en todo el día
     (capturado_en_zamora sigue en False, tal y como lo deja el placeholder de
@@ -786,12 +895,11 @@ def _resolve_expired_madrid_trains(now_local: datetime, trains_today: list[dict]
             continue
 
         cod = train["cod_comercial"]
-        state = _get_state(cod, now_local)
+        state = _get_state(cod, today)
         if not state or state.get("entregado"):
             continue
 
-        h, m = map(int, train["hora_llegada_destino"].split(":"))
-        hora_llegada_programada = now_local.replace(hour=h, minute=m, second=0, microsecond=0)
+        hora_llegada_programada = _schedule_datetime(today, train["hora_llegada_destino"], now_local.tzinfo)
         ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
         window_end = hora_llegada_programada + timedelta(minutes=ult_retraso_conocido + 10)
 
@@ -808,7 +916,7 @@ def _resolve_expired_madrid_trains(now_local: datetime, trains_today: list[dict]
         # El estado ya tiene ult_retraso y hora_llegada_corregida correctos
         # de la última _update_state; basta con marcarlo como entregado.
         gtfsrt_fields = _enrich_with_gtfsrt(cod, "Madrid", CHAMARTIN_CODE, log_extra)
-        _mark_done(cod, now_local, **gtfsrt_fields)
+        _mark_done(cod, today, now_local, **gtfsrt_fields)
         logger.warning(
             "Tren %s (Madrid) ventana cerrada sin detección → entregado con "
             "últimos datos conocidos (retraso: %d min)", cod, ult_retraso_conocido, extra=log_extra
@@ -820,23 +928,24 @@ def _resolve_expired_madrid_trains(now_local: datetime, trains_today: list[dict]
 
 def daily_dump_handler(event, context):
     """
-    Lambda de volcado diario. Se ejecuta poco después de medianoche (hora de
-    Madrid), tras el último ciclo de polling del día anterior y antes de que
-    el TTL de DynamoDB (00:30) pueda barrer sus datos. Lee de DynamoDB todos
-    los trenes programados el día que acaba de terminar (sembrados por
+    Lambda de volcado diario. Se ejecuta a las 02:15 (hora de Madrid), tras
+    el tramo de polling de madrugada del día anterior (ver
+    NIGHT_TAIL_WINDOW_HOURS/_operational_date) y antes de que el TTL de
+    DynamoDB (02:30) pueda barrer sus datos. Lee de DynamoDB todos los
+    trenes programados el día que acaba de terminar (sembrados por
     _seed_todays_trains, que crea un item por cada uno) y los escribe en un
     único fichero JSONL en S3.
 
     Un tren que nunca llegó a marcarse 'entregado' (nunca detectado en
-    flotaLD.json en todo el día) se vuelca igualmente como 'cancelado': true,
-    con 'minutos_retraso'/'hora_llegada_corregida' a null — no hay dato real
-    de retraso que reportar, y forzar un valor (p. ej. 0) contaminaría medias
-    y estadísticas como si el tren hubiese circulado puntual.
+    flotaLD.json en todo el día, madrugada incluida) se vuelca igualmente
+    como 'cancelado': true, con 'minutos_retraso'/'hora_llegada_corregida' a
+    null — no hay dato real de retraso que reportar, y forzar un valor (p.
+    ej. 0) contaminaría medias y estadísticas como si el tren hubiese
+    circulado puntual.
     """
     log_extra = {'span_id': context.aws_request_id}
 
     now_utc = datetime.now(timezone.utc)
-    from zoneinfo import ZoneInfo
     now_local = now_utc.astimezone(ZoneInfo("Europe/Madrid"))
     target_date = now_local.date() - timedelta(days=1)
     target_date_iso = target_date.isoformat()

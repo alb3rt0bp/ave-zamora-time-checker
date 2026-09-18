@@ -43,7 +43,7 @@ Lambda poll+reencola    →    Lambda stateless con lógica de ventana
 │  ┌──────────────┐     ┌─────────────────┐     ┌──────────────────┐        │
 │  │  EventBridge │     │   Lambda        │     │   DynamoDB       │        │
 │  │  Scheduler   │────▶│  train-tracker  │────▶│  train-state     │        │
-│  │  (cada 5')   │     │  (arm64/py3.12) │     │  (TTL 00:30      │        │
+│  │  (cada 5')   │     │  (arm64/py3.12) │     │  (TTL 02:30      │        │
 │  └──────────────┘     └────────┬────────┘     │   día siguiente) │        │
 │                                │               └────────┬─────────┘        │
 │                                ▼                        │                  │
@@ -52,7 +52,7 @@ Lambda poll+reencola    →    Lambda stateless con lógica de ventana
 │                       │  (Renfe API)   │     ┌──────────────────┐          │
 │                       └────────────────┘     │  EventBridge     │          │
 │  (sin escritura a S3 durante el polling)     │  Scheduler       │          │
-│                                               │  (00:15, 1×/día) │          │
+│                                               │  (02:15, 1×/día) │          │
 │                                               └────────┬─────────┘          │
 │                                                        ▼                    │
 │                                               ┌──────────────────┐          │
@@ -325,14 +325,17 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
   lifecycle (→ Standard-IA a 30 días, → Glacier-IR a 90). EventBridge habilitado
   para notificar nuevos objetos.
 - **DynamoDB `zamora-train-state`** — on-demand (PAY_PER_REQUEST), TTL hasta las
-  00:30 del día siguiente (margen tras el último ciclo de polling y antes del
-  volcado diario), Point-in-Time Recovery. Clave simple `pk = {cod}#{fecha}`.
+  02:30 del día siguiente (margen tras el tramo de polling de madrugada y antes
+  del volcado diario), Point-in-Time Recovery. Clave simple `pk = {cod}#{fecha}`.
 - **Lambda `train-tracker`** — arm64/Graviton2, Python 3.12, 256 MB, timeout 60s.
-  Disparada por EventBridge Scheduler `rate(5 minutes)`. Siembra los trenes
-  del día en el primer ciclo y actualiza su estado en DynamoDB; no escribe en S3.
+  Disparada por EventBridge Scheduler cada 5 min entre las 07:00-23:59 y, en un
+  tramo extra de madrugada, 00:00-01:59 (para trenes muy retrasados que aún
+  siguen en ruta). Siembra los trenes del día en el primer ciclo y actualiza su
+  estado en DynamoDB; no escribe en S3.
 - **Lambda `daily-dump`** — arm64/Graviton2, Python 3.12. Disparada una vez al
-  día a las 00:15 (hora de Madrid). Escanea DynamoDB, coge los trenes del día
-  anterior marcados como `entregado` y escribe un único fichero JSONL en S3.
+  día a las 02:15 (hora de Madrid), tras el tramo de madrugada. Escanea
+  DynamoDB, coge los trenes del día anterior marcados como `entregado` y
+  escribe un único fichero JSONL en S3.
 - **Lambda `delay-metrics`** — disparada por EventBridge cuando se crea un objeto
   en `zamora-trains/`. Lee el JSONL del día (una línea por tren) y publica
   métricas en el namespace CloudWatch `ZamoraTrains`

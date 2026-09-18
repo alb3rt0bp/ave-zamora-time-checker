@@ -43,18 +43,18 @@ class TestProcessMadridTrain(HandlerTestCase):
     def test_entregado_short_circuits(self):
         self._put_state(_at(8, 40), entregado=True)
 
-        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 40), SAMPLE_LOG_EXTRA)
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 40).date(), _at(8, 40), SAMPLE_LOG_EXTRA)
 
         self.assertFalse(result)
 
     def test_via1_not_seen_before_returns_false(self):
-        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(7, 30), SAMPLE_LOG_EXTRA)
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(7, 30).date(), _at(7, 30), SAMPLE_LOG_EXTRA)
         self.assertFalse(result)
 
     def test_via1_seen_before_but_not_captured_in_zamora_returns_false(self):
         self._put_state(_at(8, 40), capturado_en_zamora=False)
 
-        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 40), SAMPLE_LOG_EXTRA)
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 40).date(), _at(8, 40), SAMPLE_LOG_EXTRA)
 
         self.assertFalse(result)
         item = self.get_item("M100", _at(8, 40).date().isoformat())
@@ -64,7 +64,7 @@ class TestProcessMadridTrain(HandlerTestCase):
         # hora_llegada_destino (08:30) + ult_retraso conocido (0) = 08:30
         self._put_state(_at(8, 20), capturado_en_zamora=True, ult_retraso=0)
 
-        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 20), SAMPLE_LOG_EXTRA)
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 20).date(), _at(8, 20), SAMPLE_LOG_EXTRA)
 
         self.assertFalse(result)
 
@@ -72,7 +72,7 @@ class TestProcessMadridTrain(HandlerTestCase):
         # gate = 08:30 + 10 = 08:40; a las 08:41 ya se acepta la desaparición.
         self._put_state(_at(8, 41), capturado_en_zamora=True, ult_retraso=10)
 
-        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 41), SAMPLE_LOG_EXTRA)
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 41).date(), _at(8, 41), SAMPLE_LOG_EXTRA)
 
         self.assertTrue(result)
         item = self.get_item("M100", _at(8, 41).date().isoformat())
@@ -89,7 +89,7 @@ class TestProcessMadridTrain(HandlerTestCase):
             _at(8, 51), capturado_en_zamora=True, ult_retraso=20, hora_llegada_corregida="08:50"
         )
 
-        self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 51), SAMPLE_LOG_EXTRA)
+        self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 51).date(), _at(8, 51), SAMPLE_LOG_EXTRA)
 
         [alert] = self.get_published_delay_alerts()
         self.assertEqual(alert["cod_comercial"], "M100")
@@ -104,7 +104,7 @@ class TestProcessMadridTrain(HandlerTestCase):
             _at(8, 41), capturado_en_zamora=True, ult_retraso=10, hora_paso_zamora="07:03"
         )
 
-        self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 41), SAMPLE_LOG_EXTRA)
+        self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 41).date(), _at(8, 41), SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", _at(8, 41).date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")
@@ -118,16 +118,14 @@ class TestProcessMadridTrain(HandlerTestCase):
             latitud=Decimal("41.5034"), longitud=Decimal("-5.7447"),
         )
 
-        self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 41), SAMPLE_LOG_EXTRA)
+        self.handler._process_madrid_train(MADRID_SCHEDULED, None, _at(8, 41).date(), _at(8, 41), SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", _at(8, 41).date().isoformat())
         self.assertEqual(item["latitud"], Decimal("41.5034"))
         self.assertEqual(item["longitud"], Decimal("-5.7447"))
 
     def test_via2_chamartin_marks_entregado_regardless_of_zamora_flag(self):
-        result = self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN, _at(8, 35), SAMPLE_LOG_EXTRA
-        )
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN, _at(8, 35).date(), _at(8, 35), SAMPLE_LOG_EXTRA)
 
         self.assertTrue(result)
         item = self.get_item("M100", _at(8, 35).date().isoformat())
@@ -140,9 +138,7 @@ class TestProcessMadridTrain(HandlerTestCase):
         self.assertEqual(self.get_published_delay_alerts(), [])
 
     def test_via2_chamartin_with_high_delay_publishes_alert(self):
-        self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN_CON_RETRASO, _at(8, 35), SAMPLE_LOG_EXTRA
-        )
+        self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN_CON_RETRASO, _at(8, 35).date(), _at(8, 35), SAMPLE_LOG_EXTRA)
 
         [alert] = self.get_published_delay_alerts()
         self.assertEqual(alert["cod_comercial"], "M100")
@@ -153,9 +149,7 @@ class TestProcessMadridTrain(HandlerTestCase):
         # (08:30) frente a _at(8, 35) -> retraso corregido = 5 min, así que
         # hora_llegada_corregida debe reflejar la hora actual (08:35), no la
         # fabricada a partir del dato corrupto.
-        result = self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN_CON_RETRASO_NEGATIVO_ANOMALO, _at(8, 35), SAMPLE_LOG_EXTRA
-        )
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN_CON_RETRASO_NEGATIVO_ANOMALO, _at(8, 35).date(), _at(8, 35), SAMPLE_LOG_EXTRA)
 
         self.assertTrue(result)
         item = self.get_item("M100", _at(8, 35).date().isoformat())
@@ -173,9 +167,7 @@ class TestProcessMadridTrain(HandlerTestCase):
         # reflejar ese retraso fresco, no el desfasado.
         self._put_state(_at(8, 35), capturado_en_zamora=True, ult_retraso=3)
 
-        self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN, _at(8, 35), SAMPLE_LOG_EXTRA
-        )
+        self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN, _at(8, 35).date(), _at(8, 35), SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", _at(8, 35).date().isoformat())
         self.assertEqual(item["ult_retraso"], TRAIN_M100_EN_CHAMARTIN["ultRetraso"])
@@ -194,17 +186,13 @@ class TestProcessMadridTrain(HandlerTestCase):
             _at(8, 35), capturado_en_zamora=True, ult_retraso=3, hora_paso_zamora="07:03"
         )
 
-        self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN, _at(8, 35), SAMPLE_LOG_EXTRA
-        )
+        self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_CHAMARTIN, _at(8, 35).date(), _at(8, 35), SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", _at(8, 35).date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")
 
     def test_en_route_updates_state_without_recording(self):
-        result = self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(7, 30), SAMPLE_LOG_EXTRA
-        )
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(7, 30).date(), _at(7, 30), SAMPLE_LOG_EXTRA)
 
         self.assertFalse(result)
         item = self.get_item("M100", _at(7, 30).date().isoformat())
@@ -215,18 +203,14 @@ class TestProcessMadridTrain(HandlerTestCase):
         self.assertEqual(float(item["longitud"]), TRAIN_M100_EN_RUTA["longitud"])
 
     def test_en_route_sets_capturado_en_zamora_when_passing_through_zamora(self):
-        result = self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_ZAMORA, _at(7, 55), SAMPLE_LOG_EXTRA
-        )
+        result = self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_ZAMORA, _at(7, 55).date(), _at(7, 55), SAMPLE_LOG_EXTRA)
 
         self.assertFalse(result)
         item = self.get_item("M100", _at(7, 55).date().isoformat())
         self.assertTrue(item["capturado_en_zamora"])
 
     def test_en_route_not_yet_at_zamora_leaves_hora_paso_zamora_unset(self):
-        self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(7, 30), SAMPLE_LOG_EXTRA
-        )
+        self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(7, 30).date(), _at(7, 30), SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", _at(7, 30).date().isoformat())
         self.assertNotIn("hora_paso_zamora", item)
@@ -234,9 +218,7 @@ class TestProcessMadridTrain(HandlerTestCase):
     def test_en_route_sets_hora_paso_zamora_when_passing_through_zamora(self):
         # hora_salida (07:00, paso programado por Zamora para este sentido) +
         # ultRetraso de TRAIN_M100_EN_ZAMORA (3) = 07:03.
-        self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_ZAMORA, _at(7, 55), SAMPLE_LOG_EXTRA
-        )
+        self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_ZAMORA, _at(7, 55).date(), _at(7, 55), SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", _at(7, 55).date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")
@@ -244,9 +226,7 @@ class TestProcessMadridTrain(HandlerTestCase):
     def test_en_route_keeps_capturado_en_zamora_true_once_set(self):
         self._put_state(_at(8, 0), capturado_en_zamora=True)
 
-        self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(8, 5), SAMPLE_LOG_EXTRA
-        )
+        self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(8, 5).date(), _at(8, 5), SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", _at(8, 5).date().isoformat())
         self.assertTrue(item["capturado_en_zamora"])
@@ -258,9 +238,7 @@ class TestProcessMadridTrain(HandlerTestCase):
         # trae un ultRetraso distinto al usado para fijar el valor original).
         self._put_state(_at(8, 0), capturado_en_zamora=True, hora_paso_zamora="07:03")
 
-        self.handler._process_madrid_train(
-            MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(8, 5), SAMPLE_LOG_EXTRA
-        )
+        self.handler._process_madrid_train(MADRID_SCHEDULED, TRAIN_M100_EN_RUTA, _at(8, 5).date(), _at(8, 5), SAMPLE_LOG_EXTRA)
 
         item = self.get_item("M100", _at(8, 5).date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")

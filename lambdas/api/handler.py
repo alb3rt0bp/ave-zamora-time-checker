@@ -8,12 +8,18 @@ from datetime import date, datetime, timezone
 
 import boto3
 
+from gtfs_client import GtfsClient
+from gtfs_schedule_reference import build_schedule_reference
+import schedule_reference_cache
+
 logger = logging.getLogger("api")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 S3_BUCKET = os.environ["DATALAKE_S3_BUCKET"]
 DYNAMODB_TABLE = os.environ["DYNAMODB_STATE_TABLE"]
 DYNAMODB_METRICS_TABLE = os.environ["DYNAMODB_METRICS_TABLE"]
+ZAMORA_CODE = os.environ["ZAMORA_STATION_CODE"]
+CHAMARTIN_CODE = os.environ["CHAMARTIN_STATION_CODE"]
 SIGNIFICANT_DELAY_THRESHOLD_MINUTES = int(os.environ.get("SIGNIFICANT_DELAY_THRESHOLD_MINUTES", "15"))
 # Por debajo de esta muestra la mediana del propio tren deja de batir a la
 # mediana de su sentido como predictor (validado con un backtest
@@ -45,6 +51,12 @@ def _build_train_schedule_index(trains: list[dict]) -> list[dict]:
     filas de horario (un tren puede tener varias filas, una por tipo_dia).
     Se calcula una sola vez al importar el módulo — no cambia entre
     invocaciones de la Lambda.
+
+    Usado solo como FALLBACK de get_train_schedule_handler cuando la
+    resolución en vivo desde GTFS (ver build_schedule_reference) falla:
+    config/train_schedules.json es un horario compilado a mano en un momento
+    dado y puede quedar desactualizado en cuanto Renfe cambia horarios (ver
+    CLAUDE.md, "Static schedule source: GTFS").
     """
     by_cod: dict[str, dict] = {}
     for train in trains:
@@ -72,7 +84,7 @@ def _build_train_schedule_index(trains: list[dict]) -> list[dict]:
     ]
 
 
-TRAIN_SCHEDULE_INDEX = _build_train_schedule_index(schedules_config["trains"])
+STATIC_TRAIN_SCHEDULE_INDEX = _build_train_schedule_index(schedules_config["trains"])
 
 
 def _parse_date_param(event: dict) -> date | None:
@@ -477,11 +489,103 @@ def get_global_metrics_handler(event, context):
     return _json_response(200, response)
 
 
-def get_train_schedule_handler(event, context):
-    log_extra = {'span_id': context.aws_request_id}
+def _today_madrid() -> date:
+    from zoneinfo import ZoneInfo
+    return datetime.now(timezone.utc).astimezone(ZoneInfo("Europe/Madrid")).date()
 
-    logger.info("get_train_schedule_handler: %d trenes", len(TRAIN_SCHEDULE_INDEX), extra=log_extra)
-    return _json_response(200, TRAIN_SCHEDULE_INDEX)
+
+def _resolve_and_cache_schedule_reference(today: date, log_extra: dict) -> list[dict] | None:
+    """
+    Descarga y parsea el GTFS de Renfe, resuelve el horario de referencia
+    vigente en `today` y lo cachea en S3. Devuelve None (sin lanzar) si
+    falla o sale vacío — compartido por get_train_schedule_handler (que cae
+    al fichero estático ante un None) y refresh_schedule_reference_handler
+    (que ante un None simplemente deja la caché sin precalentar para hoy y
+    reintentará mañana).
+    """
+    try:
+        gtfs_files = GtfsClient(log_extra).download_and_extract()
+        trains = build_schedule_reference(gtfs_files, today, ZAMORA_CODE, CHAMARTIN_CODE, log_extra)
+        if not trains:
+            raise ValueError("GTFS resuelto sin ningún tren para el horario de referencia")
+    except Exception as exc:
+        logger.warning(
+            "No se pudo resolver el horario de referencia desde GTFS para %s: %s",
+            today.isoformat(), exc, extra=log_extra,
+        )
+        return None
+
+    schedule_reference_cache.put_cached_reference(s3, S3_BUCKET, today, trains, log_extra)
+    return trains
+
+
+def get_train_schedule_handler(event, context):
+    """
+    Horario de referencia (qué días de la semana circula cada tren y a qué
+    hora) resuelto en vivo desde el GTFS estático de Renfe (cacheado en S3,
+    una descarga por día — ver schedule_reference_cache.py), no desde el
+    fichero estático compilado a mano: ese fichero queda desactualizado en
+    cuanto Renfe cambia horarios (ver CLAUDE.md), que es exactamente lo que
+    esta función evita. En el caso normal la caché ya la ha precalentado
+    refresh_schedule_reference_handler poco después de medianoche, así que
+    esta petición no paga la descarga+parseo del GTFS; solo lo hace ella
+    misma si esa caché aún no existe (primer despliegue, o el refresco de
+    hoy falló). Si la resolución en vivo también falla aquí, se recurre a
+    STATIC_TRAIN_SCHEDULE_INDEX — degradación silenciosa, a diferencia de
+    schedule_resolver.py: esta pantalla es puramente informativa y no decide
+    qué trenes se monitorizan.
+    """
+    log_extra = {'span_id': context.aws_request_id}
+    today = _today_madrid()
+
+    trains = schedule_reference_cache.get_cached_reference(s3, S3_BUCKET, today, log_extra)
+    if trains is None:
+        trains = _resolve_and_cache_schedule_reference(today, log_extra)
+    if trains is None:
+        logger.warning(
+            "get_train_schedule_handler: usando el fichero estático embebido, puede estar desactualizado",
+            extra=log_extra,
+        )
+        trains = STATIC_TRAIN_SCHEDULE_INDEX
+
+    logger.info("get_train_schedule_handler: %d trenes", len(trains), extra=log_extra)
+    return _json_response(200, trains)
+
+
+def refresh_schedule_reference_handler(event, context):
+    """
+    Ejecutada una vez al día (EventBridge Scheduler, poco después de
+    medianoche hora de Madrid) para precalentar schedules/reference-{fecha}.json
+    ANTES de que llegue el primer visitante del frontend del día — así el
+    horario de referencia queda al día todos los días sin depender de que
+    alguien visite la web justo después de un cambio de horarios de Renfe,
+    y sin que esa primera visita pague la latencia de descargar y parsear el
+    GTFS completo (~700 KB, ~90k filas). No lanza ni alerta si falla (best
+    effort): get_train_schedule_handler ya sabe resolverlo bajo demanda o
+    caer al fichero estático, así que un fallo aquí solo implica que la
+    primera petición del día será algo más lenta.
+    """
+    log_extra = {'span_id': context.aws_request_id}
+    today = _today_madrid()
+
+    if schedule_reference_cache.get_cached_reference(s3, S3_BUCKET, today, log_extra) is not None:
+        logger.info(
+            "refresh_schedule_reference_handler: %s ya estaba cacheado", today.isoformat(), extra=log_extra
+        )
+        return
+
+    trains = _resolve_and_cache_schedule_reference(today, log_extra)
+    if trains is None:
+        logger.warning(
+            "refresh_schedule_reference_handler: no se pudo precalentar la caché de %s",
+            today.isoformat(), extra=log_extra,
+        )
+        return
+
+    logger.info(
+        "refresh_schedule_reference_handler: caché precalentada para %s (%d trenes)",
+        today.isoformat(), len(trains), extra=log_extra,
+    )
 
 
 def get_flota_handler(event, context):

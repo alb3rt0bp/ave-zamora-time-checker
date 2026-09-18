@@ -11,7 +11,7 @@ NOW = datetime(MONDAY.year, MONDAY.month, MONDAY.day, 8, 0, tzinfo=TZ)
 
 class TestGetState(HandlerTestCase):
     def test_returns_none_when_no_item_exists(self):
-        result = self.handler._get_state("M100", NOW)
+        result = self.handler._get_state("M100", NOW.date())
         self.assertIsNone(result)
 
     def test_returns_item_when_it_exists(self):
@@ -19,7 +19,7 @@ class TestGetState(HandlerTestCase):
             Item={"pk": f"M100#{NOW.date().isoformat()}", "entregado": False}
         )
 
-        result = self.handler._get_state("M100", NOW)
+        result = self.handler._get_state("M100", NOW.date())
 
         self.assertEqual(result["entregado"], False)
 
@@ -28,7 +28,7 @@ class TestGetState(HandlerTestCase):
             Item={"pk": "M100#2026-01-04", "entregado": True}
         )
 
-        result = self.handler._get_state("M100", NOW)  # NOW es 2026-01-05
+        result = self.handler._get_state("M100", NOW.date())  # NOW es 2026-01-05
 
         self.assertIsNone(result)
 

@@ -8,6 +8,7 @@ from tests.dummies.reference_dates import MONDAY
 
 TZ = ZoneInfo("Europe/Madrid")
 NOW = datetime(MONDAY.year, MONDAY.month, MONDAY.day, 8, 45, tzinfo=TZ)
+TODAY = NOW.date()
 
 
 class TestMarkDone(HandlerTestCase):
@@ -21,27 +22,27 @@ class TestMarkDone(HandlerTestCase):
         )
 
     def test_sets_entregado_true(self):
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertTrue(item["entregado"])
 
     def test_always_sets_ttl_even_without_prior_update_state(self):
-        expected_ttl = self.handler._end_of_day_ttl(NOW)
+        expected_ttl = self.handler._end_of_day_ttl(TODAY)
 
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["ttl"], expected_ttl)
 
     def test_sets_hora_llegada_corregida_when_given(self):
-        self.handler._mark_done("M100", NOW, hora_llegada_corregida="08:47")
+        self.handler._mark_done("M100", TODAY, NOW, hora_llegada_corregida="08:47")
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_llegada_corregida"], "08:47")
 
     def test_sets_capturado_en_zamora_when_given(self):
-        self.handler._mark_done("M100", NOW, capturado_en_zamora=True)
+        self.handler._mark_done("M100", TODAY, NOW, capturado_en_zamora=True)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertTrue(item["capturado_en_zamora"])
@@ -53,7 +54,7 @@ class TestMarkDone(HandlerTestCase):
             ExpressionAttributeValues={":v": True},
         )
 
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertTrue(item["capturado_en_zamora"])
@@ -69,7 +70,7 @@ class TestMarkDone(HandlerTestCase):
             ExpressionAttributeValues={":v": 3},
         )
 
-        self.handler._mark_done("M100", NOW, hora_llegada_corregida="08:47", ult_retraso=6)
+        self.handler._mark_done("M100", TODAY, NOW, hora_llegada_corregida="08:47", ult_retraso=6)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["ult_retraso"], 6)
@@ -81,13 +82,13 @@ class TestMarkDone(HandlerTestCase):
             ExpressionAttributeValues={":v": 3},
         )
 
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["ult_retraso"], 3)
 
     def test_sets_hora_paso_zamora_when_given(self):
-        self.handler._mark_done("M100", NOW, hora_paso_zamora="07:03")
+        self.handler._mark_done("M100", TODAY, NOW, hora_paso_zamora="07:03")
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")
@@ -103,13 +104,13 @@ class TestMarkDone(HandlerTestCase):
             ExpressionAttributeValues={":v": "07:03"},
         )
 
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_paso_zamora"], "07:03")
 
     def test_sets_minutos_retraso_gtfsrt_when_given(self):
-        self.handler._mark_done("M100", NOW, minutos_retraso_gtfsrt=4)
+        self.handler._mark_done("M100", TODAY, NOW, minutos_retraso_gtfsrt=4)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["minutos_retraso_gtfsrt"], 4)
@@ -121,13 +122,13 @@ class TestMarkDone(HandlerTestCase):
             ExpressionAttributeValues={":v": 4},
         )
 
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["minutos_retraso_gtfsrt"], 4)
 
     def test_sets_hora_llegada_gtfsrt_when_given(self):
-        self.handler._mark_done("M100", NOW, hora_llegada_gtfsrt="08:49")
+        self.handler._mark_done("M100", TODAY, NOW, hora_llegada_gtfsrt="08:49")
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_llegada_gtfsrt"], "08:49")
@@ -139,13 +140,13 @@ class TestMarkDone(HandlerTestCase):
             ExpressionAttributeValues={":v": "08:49"},
         )
 
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_llegada_gtfsrt"], "08:49")
 
     def test_sets_hora_paso_zamora_gtfsrt_when_given(self):
-        self.handler._mark_done("M100", NOW, hora_paso_zamora_gtfsrt="07:05")
+        self.handler._mark_done("M100", TODAY, NOW, hora_paso_zamora_gtfsrt="07:05")
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_paso_zamora_gtfsrt"], "07:05")
@@ -157,13 +158,13 @@ class TestMarkDone(HandlerTestCase):
             ExpressionAttributeValues={":v": "07:05"},
         )
 
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["hora_paso_zamora_gtfsrt"], "07:05")
 
     def test_sets_gps_position_when_given(self):
-        self.handler._mark_done("M100", NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447"))
+        self.handler._mark_done("M100", TODAY, NOW, latitud=Decimal("41.5034"), longitud=Decimal("-5.7447"))
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["latitud"], Decimal("41.5034"))
@@ -179,7 +180,7 @@ class TestMarkDone(HandlerTestCase):
             ExpressionAttributeValues={":lat": Decimal("41.5034"), ":lon": Decimal("-5.7447")},
         )
 
-        self.handler._mark_done("M100", NOW)
+        self.handler._mark_done("M100", TODAY, NOW)
 
         item = self.get_item("M100", NOW.date().isoformat())
         self.assertEqual(item["latitud"], Decimal("41.5034"))
