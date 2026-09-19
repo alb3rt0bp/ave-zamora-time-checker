@@ -10,7 +10,8 @@ lambda_handler se ejecuta cada 5 minutos por EventBridge Scheduler:
    descargar/parsear GTFS; el resto del día lee la caché.
 1. En el primer ciclo del día, siembra en DynamoDB un placeholder por cada
    tren de ese horario (_seed_todays_trains), para que el listado del día
-   esté disponible desde el primer momento.
+   esté disponible desde el primer momento. Solo en el tramo diurno: un día
+   nunca se siembra fuera de su propio día calendario.
 2. Determina qué trenes tienen ventana activa ahora mismo (ver
    schedule_matcher.py: la ventana depende del sentido y, para Madrid, del
    último retraso conocido en DynamoDB) sobre ese mismo horario del día.
@@ -37,13 +38,17 @@ _operational_date): en ese tramo no se recalculan ventanas de apertura
 sigue intentando cualquier tren de ese día aún no marcado 'entregado'.
 _schedule_datetime ancla las horas programadas al día OPERATIVO (no al día
 calendario de "ahora"), para que las comparaciones de cierre de ventana
-sigan siendo correctas cruzando medianoche.
+sigan siendo correctas cruzando medianoche. En ese tramo NO se siembra (ver
+_seed_todays_trains): el día ya se sembró por la mañana y resembrarlo
+borraría el día tal y como ocurrió el 2026-09-18.
 
 daily_dump_handler se ejecuta una vez al día a las 02:15 (hora de Madrid),
 después de que termine el tramo de madrugada: vuelca a un único fichero
 JSONL en S3 todos los trenes programados el día que acaba de terminar
 (sembrados por _seed_todays_trains), leyendo su estado en DynamoDB (cuyo TTL
-no expira hasta las 02:30, dejando margen de sobra). Los trenes que nunca se
+deja un día entero de margen tras el volcado — ver _end_of_day_ttl). Si el
+marcador SEED# del día falta o es de otro día, el estado no es fiable y el
+volcado se aborta con aviso (_check_seed_marker). Los trenes que nunca se
 marcaron 'entregado' (nunca detectados en flotaLD.json en todo el día,
 madrugada incluida — p. ej. cancelación por huelga) se vuelcan igualmente,
 marcados con 'cancelado': true y 'minutos_retraso': null, para que consten
@@ -104,9 +109,28 @@ NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES = int(
 # margen), así que se añade un tramo extra de polling de madrugada
 # [00:00, NIGHT_TAIL_WINDOW_HOURS) que sigue perteneciendo operativamente al
 # día que acaba de terminar (ver _operational_date) — debe coincidir con la
-# regla "ScheduleNightTail" del template y con TTL/volcado diario, que dejan
-# NIGHT_TAIL_WINDOW_HOURS:30 / NIGHT_TAIL_WINDOW_HOURS:15 de margen tras él.
+# regla "ScheduleNightTail" del template, y el volcado diario corre 15 min
+# después de que termine (NIGHT_TAIL_WINDOW_HOURS:15). El TTL del estado ya
+# no va pegado a esa hora: deja un día entero de margen (ver
+# STATE_TTL_MARGIN_DAYS).
 NIGHT_TAIL_WINDOW_HOURS = int(os.environ.get("NIGHT_TAIL_WINDOW_HOURS", "2"))
+# Días COMPLETOS de margen que se dejan entre el final del tramo de madrugada
+# y la expiración por TTL del estado en DynamoDB (ver _end_of_day_ttl). Con el
+# valor por defecto (1) el estado del día D vive hasta las
+# NIGHT_TAIL_WINDOW_HOURS:30 de D+2, es decir ~26 h después del volcado
+# diario. El margen de 15 min que había antes (TTL a las 02:30 del mismo día
+# del volcado de las 02:15) resultó ser demasiado ajustado: el 2026-09-18 un
+# despliegue cambió la fórmula del TTL a media tarde, los items del día (y su
+# marcador SEED#) escritos con la fórmula anterior expiraron ANTES del
+# volcado, y el tramo de madrugada los volvió a sembrar como placeholders
+# → el Data Lake registró el día entero como cancelado. Un día entero de
+# margen absorbe además un volcado que falle y se reintente al día siguiente.
+# Coste despreciable: ~300 items/día en una tabla on-demand.
+STATE_TTL_MARGIN_DAYS = int(os.environ.get("STATE_TTL_MARGIN_DAYS", "1"))
+# Proporción de trenes marcados 'cancelado' en el volcado diario a partir de
+# la cual se avisa por email: una jornada de huelga real puede serlo, pero lo
+# normal es que un porcentaje alto sea síntoma de que el polling no funcionó.
+MAX_CANCELLED_RATIO_ALERT = float(os.environ.get("MAX_CANCELLED_RATIO_ALERT", "0.5"))
 
 # ── Clientes AWS ──────────────────────────────────────────────────────────────
 dynamodb = boto3.resource("dynamodb")
@@ -208,23 +232,28 @@ def lambda_handler(event, context):
     trains_today = todays_schedule["trains"]
     matcher = ScheduleMatcher(todays_schedule, log_extra)
 
-    # Primer ciclo del día operativo: sembrar en DynamoDB un placeholder por
-    # cada tren programado, para que el listado esté disponible desde ya.
-    # Idempotente vía el marcador SEED#{today}: en el tramo de madrugada
-    # today sigue siendo ayer, así que esto no hace nada (ya se sembró a las
-    # 07:00 de ayer).
-    _seed_todays_trains(today, now_local, trains_today, log_extra)
-
     if night_tail:
-        # Tramo de madrugada: no se recalculan ventanas de apertura (ya no
-        # aplican a estas horas), se sigue intentando cualquier tren de ayer
-        # que aún no se haya resuelto.
+        # Tramo de madrugada: NO se siembra. El día operativo es el que acaba
+        # de terminar y se sembró hace ~17 h; si su marcador SEED# no
+        # estuviera, sembrar aquí no recupera nada, sino que reescribe el día
+        # entero como placeholders sin entregar — justo lo que ocurrió el
+        # 2026-09-18, cuando el TTL antiguo (00:30) barrió el día a mitad del
+        # tramo de madrugada y el volcado de las 02:15 encontró trenes recién
+        # resembrados y los dio todos por cancelados.
+        #
+        # Tampoco se recalculan ventanas de apertura (ya no aplican a estas
+        # horas): se sigue intentando cualquier tren de ayer sin resolver.
         active_trains = _get_pending_trains(today, trains_today, log_extra)
         logger.debug(
             "Tramo de madrugada: %d trenes de %s aún pendientes",
             len(active_trains), today.isoformat(), extra=log_extra,
         )
     else:
+        # Primer ciclo del día operativo: sembrar en DynamoDB un placeholder
+        # por cada tren programado, para que el listado esté disponible desde
+        # ya. Idempotente vía el marcador SEED#{today}.
+        _seed_todays_trains(today, now_local, trains_today, log_extra)
+
         # 1. ¿Qué trenes tienen ventana activa ahora? Para Madrid, el cierre
         # de ventana depende del último retraso conocido en DynamoDB.
         active_trains = matcher.get_active_trains(
@@ -289,11 +318,17 @@ def _seed_todays_trains(today: date, now_local: datetime, trains_today: list[dic
     ciclo, en vez de ir apareciendo poco a poco a medida que cada tren se
     procesa.
 
-    Usa un item marcador (pk="SEED#{fecha}") para no repetir el sembrado en
-    cada ciclo de 5 min; cada PutItem individual lleva además una condición
-    defensiva por si dos ejecuciones se solapasen. En el tramo de madrugada
-    (ver _operational_date) `today` sigue siendo el día que acaba de
-    terminar, así que este marcador ya existe y la función no hace nada.
+    Usa un item marcador (pk="SEED#{fecha}", con la marca de tiempo del
+    sembrado en 'seeded_at') para no repetir el sembrado en cada ciclo de 5
+    min; cada PutItem individual lleva además una condición defensiva por si
+    dos ejecuciones se solapasen.
+
+    La ausencia del marcador NO se interpreta como "hay que sembrar" sin más:
+    un día solo puede sembrarse durante su propio día calendario. Si el
+    marcador falta fuera de ese día (p. ej. porque el TTL ya barrió el día
+    entero, como el 2026-09-18), sembrar no recupera nada — rellenaría el día
+    de placeholders sin entregar que el volcado diario leería como
+    cancelaciones. En ese caso se avisa y no se toca nada.
     """
     today_iso = today.isoformat()
     seed_marker_pk = f"SEED#{today_iso}"
@@ -302,8 +337,24 @@ def _seed_todays_trains(today: date, now_local: datetime, trains_today: list[dic
     if marker:
         return
 
+    if now_local.date() != today:
+        # Tramo de madrugada (o cualquier otro ciclo cuyo día operativo ya no
+        # es el día calendario): el día ya se sembró hace horas; si el
+        # marcador no está, es que el estado del día se ha perdido.
+        message = (
+            f"No se ha sembrado el día {today_iso}: falta su marcador SEED# pero la "
+            f"hora local actual ({now_local.isoformat()}) ya no pertenece a ese día "
+            f"calendario. El estado del día puede haber expirado antes de tiempo "
+            f"(revisar TTL); el volcado diario se abortará para no registrar el día "
+            f"entero como cancelado."
+        )
+        logger.error(message, extra=log_extra)
+        _publish_alert("[Zamora Trains] Sembrado fuera de día bloqueado", message, log_extra)
+        return
+
     ttl = _end_of_day_ttl(today)
     seeded = 0
+    preexisting: list[str] = []
 
     for train in trains_today:
         try:
@@ -324,10 +375,51 @@ def _seed_todays_trains(today: date, now_local: datetime, trains_today: list[dic
             )
             seeded += 1
         except state_table.meta.client.exceptions.ConditionalCheckFailedException:
-            pass  # ya existía (p. ej. ejecuciones solapadas); no se sobrescribe
+            # Ya existía; no se sobrescribe nunca (ver _alert_if_day_had_progress).
+            preexisting.append(train["cod_comercial"])
 
-    state_table.put_item(Item={"pk": seed_marker_pk, "ttl": ttl})
+    state_table.put_item(
+        Item={"pk": seed_marker_pk, "seeded_at": now_local.isoformat(), "ttl": ttl}
+    )
     logger.info("Sembrados %d trenes de hoy (%s) en DynamoDB", seeded, today_iso, extra=log_extra)
+
+    if preexisting:
+        _alert_if_day_had_progress(today, preexisting, log_extra)
+
+
+def _alert_if_day_had_progress(today: date, preexisting: list[str], log_extra: dict) -> None:
+    """
+    Se llama cuando el sembrado ha encontrado items que ya existían pese a no
+    haber marcador. Dos ejecuciones solapadas del primer ciclo del día lo
+    explican sin más (los items del otro sembrado son placeholders idénticos)
+    y no merecen aviso. Si en cambio alguno de esos items ya tenía progreso
+    real (entregado, retraso conocido u hora corregida), el marcador ha
+    desaparecido con el día a medias: nada se ha sobrescrito (el PutItem es
+    condicional), pero conviene revisarlo porque apunta a un TTL demasiado
+    corto.
+    """
+    con_progreso = []
+    for cod in preexisting:
+        state = _get_state(cod, today) or {}
+        if (state.get("entregado") or int(state.get("ult_retraso", 0) or 0) != 0
+                or state.get("hora_llegada_corregida")):
+            con_progreso.append(cod)
+
+    if not con_progreso:
+        logger.info(
+            "Sembrado: %d trenes ya existían como placeholder (ejecuciones solapadas)",
+            len(preexisting), extra=log_extra,
+        )
+        return
+
+    message = (
+        f"El sembrado del día {today.isoformat()} no ha encontrado su marcador SEED# "
+        f"pero {len(con_progreso)} trenes ya tenían estado real en DynamoDB "
+        f"({', '.join(sorted(con_progreso))}). No se ha sobrescrito ninguno, pero el "
+        f"marcador no debería desaparecer antes que los trenes del día: revisar el TTL."
+    )
+    logger.error(message, extra=log_extra)
+    _publish_alert("[Zamora Trains] Marcador de sembrado ausente con el día a medias", message, log_extra)
 
 
 def _fetch_gtfsrt_entities(log_extra: dict) -> list[dict]:
@@ -621,16 +713,22 @@ def _get_state(cod: str, today: date) -> dict | None:
 def _end_of_day_ttl(today: date) -> int:
     """
     TTL en epoch seconds: NIGHT_TAIL_WINDOW_HOURS:30 del día siguiente a
-    `today` (hora local) — p. ej. 02:30 con el valor por defecto de 2 horas.
-    Se deja un margen de 30 min tras el final del tramo de polling de
-    madrugada (ver _operational_date/NIGHT_TAIL_WINDOW_HOURS) para que
-    daily_dump_handler pueda leer los datos del día con seguridad antes de
-    que el barrido de TTL de DynamoDB (best-effort, no instantáneo) los
-    elimine.
+    `today` (hora local) MÁS STATE_TTL_MARGIN_DAYS días completos — p. ej.
+    las 02:30 de today+2 con los valores por defecto.
+
+    El estado de un día solo hace falta hasta que daily_dump_handler lo
+    vuelca a S3 (02:15 del día siguiente), pero el margen es deliberadamente
+    generoso y no ajustado a esa hora: el barrido de TTL de DynamoDB es
+    best-effort, el volcado puede fallar y reintentarse, y sobre todo un
+    cambio de la propia fórmula del TTL desplegado a media tarde deja los
+    items ya escritos ese día con el corte anterior — que es exactamente lo
+    que pasó el 2026-09-18 (ver STATE_TTL_MARGIN_DAYS). Con un día entero de
+    margen, ninguno de esos tres casos puede hacer desaparecer el estado
+    antes de volcarlo.
     """
-    next_day = today + timedelta(days=1)
+    cutoff_day = today + timedelta(days=1 + STATE_TTL_MARGIN_DAYS)
     cutoff = datetime(
-        next_day.year, next_day.month, next_day.day,
+        cutoff_day.year, cutoff_day.month, cutoff_day.day,
         hour=NIGHT_TAIL_WINDOW_HOURS, minute=30, second=0, microsecond=0,
         tzinfo=ZoneInfo("Europe/Madrid"),
     )
@@ -853,19 +951,32 @@ def _publish_schedule_fallback_alert(message: str, log_extra: dict) -> None:
     monitorizar, así que este aviso no es opcional aunque el email de
     alertas no esté configurado — solo se omite el envío en sí.
     """
+    _publish_alert(
+        "[Zamora Trains] Horario del día resuelto con fallback estático", message, log_extra
+    )
+
+
+def _publish_alert(subject: str, message: str, log_extra: dict) -> None:
+    """
+    Publica un aviso operativo por email vía AlertTopic/SNS
+    (DATA_QUALITY_ALERT_SNS_TOPIC_ARN — el topic de revisión manual, nunca
+    DelayTweetTopic, que solo debe recibir retrasos reales destinados al
+    feed público). Nunca lanza: un fallo de SNS no debe tumbar el ciclo que
+    lo invoca, y si no hay topic configurado el aviso queda al menos como
+    logger.error.
+    """
     if not DATA_QUALITY_ALERT_SNS_TOPIC_ARN:
-        logger.error("%s (sin DATA_QUALITY_ALERT_SNS_TOPIC_ARN configurado, no se envía email)", message, extra=log_extra)
+        logger.error(
+            "%s: %s (sin DATA_QUALITY_ALERT_SNS_TOPIC_ARN configurado, no se envía email)",
+            subject, message, extra=log_extra,
+        )
         return
 
     try:
-        sns.publish(
-            TopicArn=DATA_QUALITY_ALERT_SNS_TOPIC_ARN,
-            Subject="[Zamora Trains] Horario del día resuelto con fallback estático",
-            Message=message,
-        )
-        logger.info("Alerta de fallback de horario del día publicada", extra=log_extra)
+        sns.publish(TopicArn=DATA_QUALITY_ALERT_SNS_TOPIC_ARN, Subject=subject, Message=message)
+        logger.info("Alerta publicada: %s", subject, extra=log_extra)
     except Exception as exc:
-        logger.error("Error publicando alerta de fallback de horario del día: %s", exc, extra=log_extra)
+        logger.error("Error publicando la alerta '%s': %s", subject, exc, extra=log_extra)
 
 
 def _resolve_expired_madrid_trains(today: date, now_local: datetime, trains_today: list[dict], log_extra: dict) -> int:
@@ -942,6 +1053,14 @@ def daily_dump_handler(event, context):
     null — no hay dato real de retraso que reportar, y forzar un valor (p.
     ej. 0) contaminaría medias y estadísticas como si el tren hubiese
     circulado puntual.
+
+    Esa lectura de 'entregado': False como cancelación solo es válida si el
+    estado leído es el que se fue acumulando durante el día. Antes de
+    escribir nada se comprueba el marcador SEED#{fecha} (ver
+    _check_seed_marker): si falta, o se sembró un día distinto del volcado,
+    el estado del día no es de fiar y se aborta con aviso en vez de publicar
+    una jornada entera de cancelaciones falsas en el Data Lake — que es lo
+    que ocurrió el 2026-09-18.
     """
     log_extra = {'span_id': context.aws_request_id}
 
@@ -951,6 +1070,11 @@ def daily_dump_handler(event, context):
     target_date_iso = target_date.isoformat()
 
     logger.info("Volcado diario iniciado para %s", target_date_iso, extra=log_extra)
+
+    # Antes de leer nada: ¿es fiable el estado del día? (ver _check_seed_marker)
+    reason = _check_seed_marker(target_date, log_extra)
+    if reason is not None:
+        return {"statusCode": 500, "written": 0, "reason": reason}
 
     records = []
     scan_kwargs = {"FilterExpression": "attribute_exists(cod_comercial)"}
@@ -993,6 +1117,8 @@ def daily_dump_handler(event, context):
 
     logger.info("Volcado diario completado: %d trenes en %s", len(records), key, extra=log_extra)
 
+    _alert_on_excessive_cancellations(records, target_date_iso, log_extra)
+
     # Best-effort: la tabla de métricas es una caché derivada del volcado a
     # S3, que sigue siendo la fuente de verdad. Un fallo aquí no debe afectar
     # al resultado del volcado diario, ya completado con éxito.
@@ -1004,3 +1130,72 @@ def daily_dump_handler(event, context):
         logger.error("Error actualizando métricas precalculadas para %s: %s", target_date_iso, exc, extra=log_extra)
 
     return {"statusCode": 200, "written": len(records), "key": key}
+
+
+def _check_seed_marker(target_date: date, log_extra: dict) -> str | None:
+    """
+    Verifica que el estado que se va a volcar es el que se acumuló durante
+    `target_date`, apoyándose en el marcador SEED#{fecha} que escribe
+    _seed_todays_trains. Devuelve None si todo está en orden, o el motivo
+    (str) por el que NO debe volcarse:
+
+    - "seed_marker_missing": el marcador ya no está. Con el TTL actual
+      sobrevive de sobra al volcado (ver _end_of_day_ttl), así que su
+      ausencia significa que el estado del día ha expirado antes de tiempo;
+      lo que quede en la tabla está incompleto.
+    - "seed_marker_rebuilt": el marcador se escribió un día distinto del que
+      se vuelca, es decir el día se resembró a posteriori. Los items serían
+      placeholders recién creados y se volcarían como cancelados.
+
+    Los marcadores escritos por versiones anteriores no llevan 'seeded_at';
+    en ese caso solo se puede comprobar su existencia, y se da por bueno.
+    """
+    target_iso = target_date.isoformat()
+    marker = state_table.get_item(Key={"pk": f"SEED#{target_iso}"}).get("Item")
+
+    if marker is None:
+        message = (
+            f"Volcado diario del {target_iso} ABORTADO: no existe el marcador "
+            f"SEED#{target_iso}, así que el estado del día ha expirado o se ha borrado "
+            f"y lo que queda en DynamoDB está incompleto. No se escribe el fichero JSONL "
+            f"para no registrar trenes como cancelados sin haberlos monitorizado."
+        )
+        logger.error(message, extra=log_extra)
+        _publish_alert("[Zamora Trains] Volcado diario abortado: estado del día perdido", message, log_extra)
+        return "seed_marker_missing"
+
+    seeded_at = marker.get("seeded_at")
+    if seeded_at and str(seeded_at)[:10] != target_iso:
+        message = (
+            f"Volcado diario del {target_iso} ABORTADO: su marcador SEED# se sembró el "
+            f"{seeded_at}, fuera del propio día. El día se ha resembrado a posteriori, "
+            f"así que los trenes en DynamoDB son placeholders y no el estado real del día."
+        )
+        logger.error(message, extra=log_extra)
+        _publish_alert("[Zamora Trains] Volcado diario abortado: día resembrado", message, log_extra)
+        return "seed_marker_rebuilt"
+
+    return None
+
+
+def _alert_on_excessive_cancellations(records: list[dict], target_date_iso: str, log_extra: dict) -> None:
+    """
+    Avisa (sin bloquear el volcado, que ya se ha escrito) si la proporción de
+    trenes cancelados supera MAX_CANCELLED_RATIO_ALERT. Una huelga real puede
+    dar un porcentaje altísimo y es un dato legítimo, así que esto no impide
+    escribir el fichero: es una red de seguridad para enterarse el mismo día
+    de que el polling no ha funcionado, en vez de descubrirlo semanas después
+    consultando Athena.
+    """
+    cancelados = sum(1 for record in records if record["cancelado"])
+    ratio = cancelados / len(records)
+    if ratio <= MAX_CANCELLED_RATIO_ALERT:
+        return
+
+    message = (
+        f"El volcado del {target_date_iso} ha registrado {cancelados} de {len(records)} "
+        f"trenes como cancelados ({ratio:.0%}, umbral {MAX_CANCELLED_RATIO_ALERT:.0%}). "
+        f"Si no hubo huelga ni incidencia general, revisar los logs del polling de ese día."
+    )
+    logger.warning(message, extra=log_extra)
+    _publish_alert("[Zamora Trains] Proporción anómala de trenes cancelados", message, log_extra)

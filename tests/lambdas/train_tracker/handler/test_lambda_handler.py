@@ -172,6 +172,26 @@ class TestLambdaHandler(HandlerTestCase):
         self.assertIsNone(self.get_item("M100", "2026-01-06"))
         self.assertIsNone(self.get_item("G100", "2026-01-06"))
 
+    def test_night_tail_window_does_not_reseed_a_day_whose_marker_expired(self):
+        # LA regresión del 2026-09-18: el TTL antiguo (00:30) barrió el estado
+        # del lunes — marcador SEED# incluido — a mitad del tramo de
+        # madrugada. Con el sembrado corriendo también en ese tramo, el
+        # siguiente ciclo resembraba los 54 trenes del día como placeholders
+        # sin entregar, y el volcado de las 02:15 los daba todos por
+        # cancelados. En el tramo de madrugada NO se siembra: sin marcador ni
+        # items, la tabla se queda vacía y el volcado abortará avisando, en
+        # vez de publicar un día entero de cancelaciones falsas.
+        frozen = make_frozen_datetime(_frozen_now_next_day(0, 35))
+
+        with patch("handler.datetime", frozen), \
+             patch("urllib.request.urlopen") as mock_urlopen:
+            mock_urlopen.return_value = fake_urlopen_json([])
+            self.handler.lambda_handler({}, FakeContext())
+
+        self.assertIsNone(self.get_item("M100", "2026-01-05"))
+        self.assertIsNone(self.get_item("G100", "2026-01-05"))
+        self.assertIsNone(self.table.get_item(Key={"pk": "SEED#2026-01-05"}).get("Item"))
+
     def test_cycle_at_02_00_is_no_longer_in_the_night_tail_window(self):
         # NIGHT_TAIL_WINDOW_HOURS por defecto = 2 → a las 02:00 el día
         # operativo ya vuelve a ser el día calendario (martes): se siembra

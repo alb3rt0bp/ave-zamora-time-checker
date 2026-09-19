@@ -279,6 +279,16 @@ def _normalize_time(raw: str) -> str:
     normaliza a "HH:MM" igual que el resto del proyecto; el caso >=24h se
     envuelve al día siguiente con %, ya que este sistema no modela trayectos
     que cruzan la medianoche (mismo alcance que el resto del código).
+
+    PENDIENTE (detectado 2026-09-19, sin arreglar aquí a propósito): ese
+    envoltorio con % hace que un tren con llegada programada a las "24:05"
+    quede como "00:05", y ScheduleMatcher._is_active ancla esa hora en el
+    día calendario de "ahora" → su ventana se da por cerrada a las 00:15 de
+    ESE MISMO día, ~24 h antes de tiempo. Un tren así nunca entraría en
+    ventana activa y se volcaría siempre como 'cancelado'. Hoy no afecta a
+    ningún tren del horario real (el último llega sobre las 23:30), pero
+    arreglarlo requiere propagar el "día siguiente" hasta el matcher, no
+    solo tocar esta función. Ver la nota en CLAUDE.md.
     """
     parts = raw.strip().split(":")
     hour = int(parts[0]) % 24

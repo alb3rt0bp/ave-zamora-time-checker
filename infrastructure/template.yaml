@@ -50,6 +50,17 @@ Parameters:
     Default: "albertobp@gmail.com"
     Description: Email para alertas de retrasos (opcional)
 
+  MaxCancelledRatioAlert:
+    Type: Number
+    Default: 0.5
+    MinValue: 0
+    MaxValue: 1
+    Description: >
+      Proporción de trenes cancelados en el volcado diario a partir de la
+      cual se avisa por email. Una huelga real puede superarla legítimamente
+      (el fichero se escribe igual); sirve para detectar el mismo día que el
+      polling no ha funcionado.
+
   DelayAlertThresholdMinutes:
     Type: Number
     Default: 15
@@ -342,8 +353,12 @@ Resources:
         # seguir en ruta después de las 23:59, y sin este tramo se perdería
         # (marcado 'cancelado' en el volcado diario aunque solo llegara
         # tarde). Debe coincidir con NIGHT_TAIL_WINDOW_HOURS=2 en handler.py
-        # (_operational_date) y con el TTL/volcado diario de más abajo, que
-        # dejan 2:30/2:15 de margen tras este tramo.
+        # (_operational_date). El volcado diario de más abajo corre a las
+        # 02:15, justo después de este tramo; el TTL del estado en DynamoDB
+        # ya no va pegado a esa hora (deja un día entero de margen — ver
+        # STATE_TTL_MARGIN_DAYS en handler.py), porque ese margen de 15 min
+        # fue justo lo que se perdió el 2026-09-18 al cambiar la fórmula del
+        # TTL a media tarde.
         ScheduleEvery5MinNightTail:
           Type: ScheduleV2
           Properties:
@@ -368,6 +383,13 @@ Resources:
         Ejecutada una vez al día a las 02:15 (hora de Madrid), tras el tramo
         de polling de madrugada. Vuelca a S3 los trenes del día anterior y
         actualiza (best-effort) las métricas precalculadas en TrainMetricsTable.
+      Environment:
+        Variables:
+          # Mismo topic de revisión manual que usa TrainTrackerFunction: el
+          # volcado avisa por aquí si aborta (estado del día perdido o
+          # resembrado) o si la proporción de cancelados es anómala.
+          DATA_QUALITY_ALERT_SNS_TOPIC_ARN: !If [HasAlertEmail, !Ref AlertTopic, ""]
+          MAX_CANCELLED_RATIO_ALERT: !Ref MaxCancelledRatioAlert
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref TrainStateTable
@@ -375,6 +397,11 @@ Resources:
             TableName: !Ref TrainMetricsTable
         - S3WritePolicy:
             BucketName: !Ref DatalakeBucket
+        - !If
+          - HasAlertEmail
+          - SNSPublishMessagePolicy:
+              TopicName: !GetAtt AlertTopic.TopicName
+          - !Ref AWS::NoValue
       Events:
         DailyDumpSchedule:
           Type: ScheduleV2
@@ -384,7 +411,7 @@ Resources:
             ScheduleExpressionTimezone: "Europe/Madrid"
             FlexibleTimeWindow:
               Mode: "OFF"
-            Description: "Volcado diario a S3, 02:15 hora de Madrid (el TTL de DynamoDB expira a las 02:30)"
+            Description: "Volcado diario a S3, 02:15 hora de Madrid (el TTL de DynamoDB deja un día entero de margen)"
       Tags:
         Project: ZamoraTrainObservability
         Environment: !Ref Environment

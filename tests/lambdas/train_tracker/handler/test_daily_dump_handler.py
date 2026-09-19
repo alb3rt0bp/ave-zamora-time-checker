@@ -17,6 +17,22 @@ class FakeContext:
 
 
 class TestDailyDumpHandler(HandlerTestCase):
+    def setUp(self):
+        super().setUp()
+        # El volcado exige el marcador SEED# del día como prueba de que el
+        # estado que va a leer es el que se acumuló ese día (ver
+        # _check_seed_marker). Los tests que prueban su ausencia lo borran.
+        self._put_seed_marker(seeded_at=f"{TARGET_DAY.isoformat()}T07:00:00+01:00")
+
+    def _put_seed_marker(self, seeded_at=None, fecha=TARGET_DAY):
+        item = {"pk": f"SEED#{fecha.isoformat()}", "ttl": 0}
+        if seeded_at is not None:
+            item["seeded_at"] = seeded_at
+        self.table.put_item(Item=item)
+
+    def _delete_seed_marker(self, fecha=TARGET_DAY):
+        self.table.delete_item(Key={"pk": f"SEED#{fecha.isoformat()}"})
+
     def _frozen(self):
         return make_frozen_datetime(madrid_time_to_utc(DUMP_RUN_DAY, 0, 15))
 
@@ -125,8 +141,7 @@ class TestDailyDumpHandler(HandlerTestCase):
         self.assertIsNone(record["hora_paso_zamora_gtfsrt"])
 
     def test_excludes_seed_marker_item(self):
-        self.table.put_item(Item={"pk": f"SEED#{TARGET_DAY.isoformat()}", "ttl": 0})
-
+        # El marcador (sembrado en setUp) no es un tren: no debe volcarse.
         with patch("handler.datetime", self._frozen()):
             result = self.handler.daily_dump_handler({}, FakeContext())
 
@@ -185,6 +200,110 @@ class TestDailyDumpHandler(HandlerTestCase):
 
         self.assertEqual(result["written"], 1)
         self.assertIn("key", result)
+
+    def test_aborts_without_writing_when_the_seed_marker_is_missing(self):
+        # Regresión del 2026-09-18: el TTL barrió el estado del día (marcador
+        # incluido) antes del volcado y el tramo de madrugada resembró
+        # placeholders, así que el volcado registró el día entero como
+        # cancelado. Sin marcador el estado no es fiable: no se escribe nada.
+        self._delete_seed_marker()
+        self.table.put_item(Item={
+            "pk": f"G100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "G100",
+            "sentido": "Galicia",
+            "tipo_dia": "laborable",
+            "hora_programada": "09:30",
+            "ult_retraso": 0,
+            "entregado": False,
+        })
+
+        with patch("handler.datetime", self._frozen()):
+            result = self.handler.daily_dump_handler({}, FakeContext())
+
+        self.assertEqual(result["statusCode"], 500)
+        self.assertEqual(result["reason"], "seed_marker_missing")
+        self.assertNotIn("Contents", self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET))
+
+    def test_alerts_when_the_seed_marker_is_missing(self):
+        self._delete_seed_marker()
+        self.table.put_item(Item={
+            "pk": f"G100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "G100", "sentido": "Galicia", "tipo_dia": "laborable",
+            "hora_programada": "09:30", "ult_retraso": 0, "entregado": False,
+        })
+
+        with patch("handler.datetime", self._frozen()):
+            self.handler.daily_dump_handler({}, FakeContext())
+
+        alerts = self.get_published_data_quality_alerts()
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("estado del día perdido", alerts[0]["subject"])
+
+    def test_aborts_when_the_day_was_reseeded_afterwards(self):
+        # Marcador escrito en el día del volcado, no en el día volcado: el
+        # día se resembró a posteriori y sus trenes son placeholders nuevos.
+        self._delete_seed_marker()
+        self._put_seed_marker(seeded_at=f"{DUMP_RUN_DAY.isoformat()}T01:05:00+01:00")
+        self.table.put_item(Item={
+            "pk": f"G100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "G100", "sentido": "Galicia", "tipo_dia": "laborable",
+            "hora_programada": "09:30", "ult_retraso": 0, "entregado": False,
+        })
+
+        with patch("handler.datetime", self._frozen()):
+            result = self.handler.daily_dump_handler({}, FakeContext())
+
+        self.assertEqual(result["reason"], "seed_marker_rebuilt")
+        self.assertNotIn("Contents", self.s3.list_objects_v2(Bucket=self.handler.S3_BUCKET))
+        self.assertIn("resembrado", self.get_published_data_quality_alerts()[0]["subject"])
+
+    def test_accepts_a_legacy_marker_without_seeded_at(self):
+        # Los marcadores escritos por versiones anteriores no llevan
+        # 'seeded_at': solo se puede comprobar que existen, y se dan por buenos.
+        self._delete_seed_marker()
+        self._put_seed_marker(seeded_at=None)
+        self.table.put_item(Item={
+            "pk": f"M100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "M100", "sentido": "Madrid", "tipo_dia": "laborable",
+            "hora_programada": "08:30", "hora_llegada_corregida": "08:35",
+            "ult_retraso": 5, "entregado": True,
+        })
+
+        with patch("handler.datetime", self._frozen()):
+            result = self.handler.daily_dump_handler({}, FakeContext())
+
+        self.assertEqual(result["written"], 1)
+
+    def test_alerts_when_too_many_trains_are_cancelled_but_still_writes(self):
+        # Una huelga real puede dar un porcentaje altísimo de cancelados y es
+        # un dato legítimo: el fichero se escribe igual, pero avisa.
+        for cod in ("M100", "M200", "G100"):
+            self.table.put_item(Item={
+                "pk": f"{cod}#{TARGET_DAY.isoformat()}",
+                "cod_comercial": cod, "sentido": "Madrid", "tipo_dia": "laborable",
+                "hora_programada": "08:30", "ult_retraso": 0, "entregado": False,
+            })
+
+        with patch("handler.datetime", self._frozen()):
+            result = self.handler.daily_dump_handler({}, FakeContext())
+
+        self.assertEqual(result["written"], 3)
+        alerts = self.get_published_data_quality_alerts()
+        self.assertEqual(len(alerts), 1)
+        self.assertIn("cancelados", alerts[0]["subject"])
+
+    def test_does_not_alert_on_a_normal_day(self):
+        self.table.put_item(Item={
+            "pk": f"M100#{TARGET_DAY.isoformat()}",
+            "cod_comercial": "M100", "sentido": "Madrid", "tipo_dia": "laborable",
+            "hora_programada": "08:30", "hora_llegada_corregida": "08:35",
+            "ult_retraso": 5, "entregado": True,
+        })
+
+        with patch("handler.datetime", self._frozen()):
+            self.handler.daily_dump_handler({}, FakeContext())
+
+        self.assertEqual(self.get_published_data_quality_alerts(), [])
 
     def test_excludes_entregado_trains_from_a_different_day(self):
         self.table.put_item(Item={
