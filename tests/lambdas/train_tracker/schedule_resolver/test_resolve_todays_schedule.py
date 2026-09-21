@@ -32,6 +32,7 @@ GTFS_TRAINS = [
     {
         "cod_comercial": "04154", "sentido": "Madrid", "tipo_dia": "laborable",
         "hora_salida": "07:41", "hora_llegada_destino": "08:49",
+        "offset_dias_salida": 0, "offset_dias_llegada": 0,
     },
 ]
 

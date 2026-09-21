@@ -55,15 +55,15 @@ class TestExpiredStateIsNotDumpedAsCancelled(HandlerTestCase):
                 self.table.delete_item(Key={"pk": item["pk"]})
 
     def _poll_night_tail(self):
-        """Ciclo del tramo de madrugada (martes 00:35, día operativo = lunes)."""
-        frozen = make_frozen_datetime(madrid_time_to_utc(TUESDAY, 0, 35))
+        """Ciclo del tramo de madrugada (martes 00:20, día operativo = lunes)."""
+        frozen = make_frozen_datetime(madrid_time_to_utc(TUESDAY, 0, 20))
         with patch("handler.datetime", frozen), \
              patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.return_value = fake_urlopen_json([])
             self.handler.lambda_handler({}, FakeContext())
 
     def _dump_tuesday(self):
-        frozen = make_frozen_datetime(madrid_time_to_utc(TUESDAY, 2, 15))
+        frozen = make_frozen_datetime(madrid_time_to_utc(TUESDAY, 1, 0))
         with patch("handler.datetime", frozen):
             return self.handler.daily_dump_handler({}, FakeContext())
 
@@ -98,7 +98,7 @@ class TestExpiredStateIsNotDumpedAsCancelled(HandlerTestCase):
         self._poll_monday()
         self._expire_mondays_state()
 
-        frozen = make_frozen_datetime(madrid_time_to_utc(TUESDAY, 0, 35))
+        frozen = make_frozen_datetime(madrid_time_to_utc(TUESDAY, 0, 20))
         with patch("handler.datetime", frozen), \
              patch("urllib.request.urlopen") as mock_urlopen:
             mock_urlopen.return_value = fake_urlopen_json([G100_EN_ZAMORA])
@@ -111,11 +111,11 @@ class TestExpiredStateIsNotDumpedAsCancelled(HandlerTestCase):
 
     def test_ttl_now_outlives_the_daily_dump(self):
         # La causa raíz: el estado del lunes debe seguir vivo cuando corre el
-        # volcado del martes a las 02:15, con margen de sobra.
+        # volcado del martes a la 01:00, con margen de sobra.
         self._poll_monday()
 
         ttl = int(self.get_item("G100", "2026-01-05")["ttl"])
-        dump_run = int(madrid_time_to_utc(TUESDAY, 2, 15).timestamp())
+        dump_run = int(madrid_time_to_utc(TUESDAY, 1, 0).timestamp())
 
         self.assertGreater(ttl, dump_run)
         self.assertGreaterEqual((ttl - dump_run) / 3600, 24)

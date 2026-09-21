@@ -15,14 +15,33 @@ class TestIndexStopTimes(unittest.TestCase):
     def test_captures_zamora_stop_sequence_and_times(self):
         self.assertEqual(
             self.zamora_by_trip["TRIP_M1"],
-            {"stop_sequence": 4, "arrival_time": "07:39", "departure_time": "07:41"},
+            {
+                "stop_sequence": 4,
+                "arrival_time": "07:39", "arrival_offset_dias": 0,
+                "departure_time": "07:41", "departure_offset_dias": 0,
+            },
         )
 
     def test_captures_chamartin_stop_sequence_and_times(self):
         self.assertEqual(
             self.chamartin_by_trip["TRIP_M1"],
-            {"stop_sequence": 5, "arrival_time": "08:49", "departure_time": "08:49"},
+            {
+                "stop_sequence": 5,
+                "arrival_time": "08:49", "arrival_offset_dias": 0,
+                "departure_time": "08:49", "departure_offset_dias": 0,
+            },
         )
+
+    def test_captures_the_day_offset_of_times_past_midnight(self):
+        # TRIP_MNIGHT llega a Chamartín a las "24:10" de su día de servicio:
+        # hora de reloj 00:10 y un día de desplazamiento.
+        chamartin = self.chamartin_by_trip["TRIP_MNIGHT"]
+        self.assertEqual(chamartin["arrival_time"], "00:10")
+        self.assertEqual(chamartin["arrival_offset_dias"], 1)
+
+        zamora = self.zamora_by_trip["TRIP_MNIGHT"]
+        self.assertEqual(zamora["departure_time"], "23:05")
+        self.assertEqual(zamora["departure_offset_dias"], 0)
 
     def test_trip_only_stopping_at_zamora_is_absent_from_chamartin_index(self):
         self.assertIn("TRIP_NOCHAM", self.zamora_by_trip)

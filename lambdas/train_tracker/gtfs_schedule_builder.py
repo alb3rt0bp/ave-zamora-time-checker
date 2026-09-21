@@ -81,8 +81,10 @@ def build_todays_trains(
 
     Devuelve una lista de dicts con el mismo shape que
     config/train_schedules.json: cod_comercial, sentido, tipo_dia, weekdays,
-    hora_salida, hora_llegada_destino. Ordenada de forma determinista por
-    (sentido, hora_salida).
+    hora_salida, hora_llegada_destino — más offset_dias_salida /
+    offset_dias_llegada (0 salvo que esa hora caiga ya en el día siguiente,
+    ver _day_offset), que el fichero estático no tiene y schedule_resolver
+    infiere por él. Ordenada de forma determinista por (sentido, hora_salida).
     """
     zamora_by_trip, chamartin_by_trip = _index_stop_times(
         gtfs_files["stop_times.txt"], zamora_code, chamartin_code
@@ -110,11 +112,17 @@ def build_todays_trains(
             continue
 
         if sentido == "Madrid":
-            hora_salida = zamora_by_trip[trip_id]["departure_time"]
-            hora_llegada_destino = chamartin_by_trip[trip_id]["arrival_time"]
+            origen, destino = zamora_by_trip[trip_id], chamartin_by_trip[trip_id]
         else:
-            hora_salida = chamartin_by_trip[trip_id]["departure_time"]
-            hora_llegada_destino = zamora_by_trip[trip_id]["arrival_time"]
+            origen, destino = chamartin_by_trip[trip_id], zamora_by_trip[trip_id]
+
+        hora_salida = origen["departure_time"]
+        hora_llegada_destino = destino["arrival_time"]
+        # Un tren que sale a las 23:50 y llega a las "24:40" tiene la llegada
+        # en el día siguiente: sin este dato, su ventana de monitorización se
+        # cerraría a las 00:50 del mismo día en que salió (ver _day_offset).
+        offset_dias_salida = origen["departure_offset_dias"]
+        offset_dias_llegada = destino["arrival_offset_dias"]
 
         # Dedup: dos trip_id distintos (p. ej. composición doble con dos
         # orígenes) pueden coincidir en cod_comercial/sentido/horas en Zamora
@@ -127,6 +135,8 @@ def build_todays_trains(
             "weekdays": weekdays,
             "hora_salida": hora_salida,
             "hora_llegada_destino": hora_llegada_destino,
+            "offset_dias_salida": offset_dias_salida,
+            "offset_dias_llegada": offset_dias_llegada,
         }
 
     return sorted(entries.values(), key=lambda t: (t["sentido"], t["hora_salida"]))
@@ -138,7 +148,9 @@ def _index_stop_times(
     """
     Un único paso por stop_times.txt: para cada trip_id que pare en Zamora
     y/o Chamartín, guarda su stop_sequence (como int, para poder comparar
-    orden) y sus horas de llegada/salida normalizadas a "HH:MM".
+    orden) y sus horas de llegada/salida normalizadas a "HH:MM", cada una
+    con el día al que pertenece realmente (ver _day_offset: las horas >= 24
+    de GTFS son ya del día siguiente).
     """
     zamora_by_trip: dict[str, dict] = {}
     chamartin_by_trip: dict[str, dict] = {}
@@ -152,7 +164,9 @@ def _index_stop_times(
         entry = {
             "stop_sequence": int(row.get("stop_sequence") or "0"),
             "arrival_time": _normalize_time(row.get("arrival_time", "")),
+            "arrival_offset_dias": _day_offset(row.get("arrival_time", "")),
             "departure_time": _normalize_time(row.get("departure_time", "")),
+            "departure_offset_dias": _day_offset(row.get("departure_time", "")),
         }
         if stop_id == zamora_code:
             zamora_by_trip[trip_id] = entry
@@ -276,24 +290,31 @@ def _normalize_time(raw: str) -> str:
     """
     GTFS expresa las horas como "H:MM:SS" (a veces sin cero de relleno en la
     hora, y con horas >=24 para servicios que cruzan medianoche). Se
-    normaliza a "HH:MM" igual que el resto del proyecto; el caso >=24h se
-    envuelve al día siguiente con %, ya que este sistema no modela trayectos
-    que cruzan la medianoche (mismo alcance que el resto del código).
+    normaliza a la hora de reloj "HH:MM" igual que el resto del proyecto:
+    "24:05" -> "00:05".
 
-    PENDIENTE (detectado 2026-09-19, sin arreglar aquí a propósito): ese
-    envoltorio con % hace que un tren con llegada programada a las "24:05"
-    quede como "00:05", y ScheduleMatcher._is_active ancla esa hora en el
-    día calendario de "ahora" → su ventana se da por cerrada a las 00:15 de
-    ESE MISMO día, ~24 h antes de tiempo. Un tren así nunca entraría en
-    ventana activa y se volcaría siempre como 'cancelado'. Hoy no afecta a
-    ningún tren del horario real (el último llega sobre las 23:30), pero
-    arreglarlo requiere propagar el "día siguiente" hasta el matcher, no
-    solo tocar esta función. Ver la nota en CLAUDE.md.
+    El día que se pierde en ese envoltorio NO se tira: lo recupera
+    _day_offset, y build_todays_trains lo publica como offset_dias_salida /
+    offset_dias_llegada para que ScheduleMatcher y handler._schedule_datetime
+    puedan anclar la hora en el día correcto. Sin ese offset, la ventana de
+    un tren que llega a las "24:05" se daría por cerrada a las 00:15 del
+    MISMO día, ~24 h antes de tiempo, y el tren acabaría volcado como
+    'cancelado' todos los días.
     """
     parts = raw.strip().split(":")
     hour = int(parts[0]) % 24
     minute = int(parts[1])
     return f"{hour:02d}:{minute:02d}"
+
+
+def _day_offset(raw: str) -> int:
+    """
+    Días que hay que sumar a la hora de reloj de _normalize_time para
+    situarla en el día real: 0 para "23:50", 1 para "24:05" o "25:20". GTFS
+    cuenta las horas desde el inicio del día de servicio, así que un valor
+    >= 24 significa "ya es el día siguiente".
+    """
+    return int(raw.strip().split(":")[0]) // 24
 
 
 def _tipo_dia_for(target_date: date) -> str:

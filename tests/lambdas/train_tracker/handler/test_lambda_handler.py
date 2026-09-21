@@ -26,7 +26,7 @@ def _frozen_now(hh, mm):
 def _frozen_now_next_day(hh, mm):
     """
     Igual que _frozen_now pero en el día calendario siguiente (martes) —
-    para simular el tramo de polling de madrugada [00:00, NIGHT_TAIL_WINDOW_HOURS)
+    para simular el tramo de polling de madrugada [00:00, NIGHT_TAIL_WINDOW_MINUTES)
     que, pese a caer ya en el día calendario siguiente, sigue perteneciendo
     operativamente al lunes (ver _operational_date en handler.py).
     """
@@ -121,7 +121,7 @@ class TestLambdaHandler(HandlerTestCase):
             "ult_retraso": 0,
             "capturado_en_zamora": True,
         })
-        frozen = make_frozen_datetime(_frozen_now_next_day(0, 30))
+        frozen = make_frozen_datetime(_frozen_now_next_day(0, 15))
 
         with patch("handler.datetime", frozen), \
              patch("urllib.request.urlopen") as mock_urlopen:
@@ -133,7 +133,7 @@ class TestLambdaHandler(HandlerTestCase):
         self.assertTrue(item["entregado"])
 
     def test_night_tail_window_keeps_checking_train_still_in_fleet(self):
-        # G100 (Galicia) aún no ha pasado por Zamora a las 00:30 del martes
+        # G100 (Galicia) aún no ha pasado por Zamora a las 00:15 del martes
         # (tramo de madrugada): sigue comprobándose contra flotaLD.json en
         # vez de darse por perdido solo porque el polling normal ya paró.
         self.table.put_item(Item={
@@ -142,7 +142,7 @@ class TestLambdaHandler(HandlerTestCase):
             "ult_retraso": 90,
             "capturado_en_zamora": False,
         })
-        frozen = make_frozen_datetime(_frozen_now_next_day(0, 30))
+        frozen = make_frozen_datetime(_frozen_now_next_day(0, 15))
 
         with patch("handler.datetime", frozen), \
              patch("urllib.request.urlopen") as mock_urlopen:
@@ -154,7 +154,7 @@ class TestLambdaHandler(HandlerTestCase):
         self.assertTrue(item["entregado"])
 
     def test_night_tail_window_does_not_reseed_or_use_tomorrows_schedule(self):
-        # El día OPERATIVO a las 00:30 del martes sigue siendo el lunes: no
+        # El día OPERATIVO a las 00:15 del martes sigue siendo el lunes: no
         # debe aparecer ningún placeholder para el martes (2026-01-06), y el
         # marcador SEED#2026-01-05 (ya sembrado durante el lunes) evita
         # resembrar M100/G100.
@@ -162,7 +162,7 @@ class TestLambdaHandler(HandlerTestCase):
         self.table.put_item(Item={
             "pk": "M100#2026-01-05", "entregado": False, "ult_retraso": 0, "capturado_en_zamora": False,
         })
-        frozen = make_frozen_datetime(_frozen_now_next_day(0, 30))
+        frozen = make_frozen_datetime(_frozen_now_next_day(0, 15))
 
         with patch("handler.datetime", frozen), \
              patch("urllib.request.urlopen") as mock_urlopen:
@@ -181,7 +181,7 @@ class TestLambdaHandler(HandlerTestCase):
         # cancelados. En el tramo de madrugada NO se siembra: sin marcador ni
         # items, la tabla se queda vacía y el volcado abortará avisando, en
         # vez de publicar un día entero de cancelaciones falsas.
-        frozen = make_frozen_datetime(_frozen_now_next_day(0, 35))
+        frozen = make_frozen_datetime(_frozen_now_next_day(0, 20))
 
         with patch("handler.datetime", frozen), \
              patch("urllib.request.urlopen") as mock_urlopen:
@@ -192,11 +192,11 @@ class TestLambdaHandler(HandlerTestCase):
         self.assertIsNone(self.get_item("G100", "2026-01-05"))
         self.assertIsNone(self.table.get_item(Key={"pk": "SEED#2026-01-05"}).get("Item"))
 
-    def test_cycle_at_02_00_is_no_longer_in_the_night_tail_window(self):
-        # NIGHT_TAIL_WINDOW_HOURS por defecto = 2 → a las 02:00 el día
+    def test_cycle_at_00_30_is_no_longer_in_the_night_tail_window(self):
+        # NIGHT_TAIL_WINDOW_MINUTES por defecto = 30 → a las 00:30 el día
         # operativo ya vuelve a ser el día calendario (martes): se siembra
         # el martes con normalidad, como cualquier primer ciclo del día.
-        frozen = make_frozen_datetime(_frozen_now_next_day(2, 0))
+        frozen = make_frozen_datetime(_frozen_now_next_day(0, 30))
 
         with patch("handler.datetime", frozen), patch("urllib.request.urlopen"):
             self.handler.lambda_handler({}, FakeContext())

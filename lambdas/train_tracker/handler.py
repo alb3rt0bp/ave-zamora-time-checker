@@ -31,7 +31,7 @@ lambda_handler se ejecuta cada 5 minutos por EventBridge Scheduler:
 El polling "normal" (pasos 0-5) para a las 23:59 (EventBridge Scheduler, ver
 infrastructure/template.yaml), pero un tren muy retrasado puede seguir en
 ruta después de esa hora. Por eso hay un tramo extra de polling de madrugada
-[00:00, NIGHT_TAIL_WINDOW_HOURS) — 2 horas por defecto — que sigue
+[00:00, NIGHT_TAIL_WINDOW_MINUTES) — 30 min por defecto — que sigue
 perteneciendo operativamente al día que acaba de terminar (ver
 _operational_date): en ese tramo no se recalculan ventanas de apertura
 (_get_pending_trains sustituye a ScheduleMatcher.get_active_trains), solo se
@@ -42,7 +42,7 @@ sigan siendo correctas cruzando medianoche. En ese tramo NO se siembra (ver
 _seed_todays_trains): el día ya se sembró por la mañana y resembrarlo
 borraría el día tal y como ocurrió el 2026-09-18.
 
-daily_dump_handler se ejecuta una vez al día a las 02:15 (hora de Madrid),
+daily_dump_handler se ejecuta una vez al día a la 01:00 (hora de Madrid),
 después de que termine el tramo de madrugada: vuelca a un único fichero
 JSONL en S3 todos los trenes programados el día que acaba de terminar
 (sembrados por _seed_todays_trains), leyendo su estado en DynamoDB (cuyo TTL
@@ -107,25 +107,24 @@ NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES = int(
 # infrastructure/template.yaml). Un tren muy retrasado puede seguir en ruta
 # después de esa hora (motivo: un tren llegó a las 23:26 y casi se sale de
 # margen), así que se añade un tramo extra de polling de madrugada
-# [00:00, NIGHT_TAIL_WINDOW_HOURS) que sigue perteneciendo operativamente al
-# día que acaba de terminar (ver _operational_date) — debe coincidir con la
-# regla "ScheduleNightTail" del template, y el volcado diario corre 15 min
-# después de que termine (NIGHT_TAIL_WINDOW_HOURS:15). El TTL del estado ya
-# no va pegado a esa hora: deja un día entero de margen (ver
-# STATE_TTL_MARGIN_DAYS).
-NIGHT_TAIL_WINDOW_HOURS = int(os.environ.get("NIGHT_TAIL_WINDOW_HOURS", "2"))
-# Días COMPLETOS de margen que se dejan entre el final del tramo de madrugada
-# y la expiración por TTL del estado en DynamoDB (ver _end_of_day_ttl). Con el
-# valor por defecto (1) el estado del día D vive hasta las
-# NIGHT_TAIL_WINDOW_HOURS:30 de D+2, es decir ~26 h después del volcado
-# diario. El margen de 15 min que había antes (TTL a las 02:30 del mismo día
-# del volcado de las 02:15) resultó ser demasiado ajustado: el 2026-09-18 un
-# despliegue cambió la fórmula del TTL a media tarde, los items del día (y su
-# marcador SEED#) escritos con la fórmula anterior expiraron ANTES del
-# volcado, y el tramo de madrugada los volvió a sembrar como placeholders
-# → el Data Lake registró el día entero como cancelado. Un día entero de
-# margen absorbe además un volcado que falle y se reintente al día siguiente.
-# Coste despreciable: ~300 items/día en una tabla on-demand.
+# [00:00, NIGHT_TAIL_WINDOW_MINUTES) que sigue perteneciendo operativamente
+# al día que acaba de terminar (ver _operational_date) — debe coincidir con
+# la regla "ScheduleNightTail" del template, y el volcado diario corre 30 min
+# después de que termine (01:00 con el valor por defecto). En minutos, no en
+# horas, porque el tramo ya no dura horas completas.
+NIGHT_TAIL_WINDOW_MINUTES = int(os.environ.get("NIGHT_TAIL_WINDOW_MINUTES", "30"))
+# Hora local ("HH:MM") a la que expira el estado del día en DynamoDB, y días
+# COMPLETOS de margen que se le suman (ver _end_of_day_ttl). Con los valores
+# por defecto el estado del día D vive hasta la 01:30 de D+2, ~24 h después
+# del volcado diario. Deliberadamente NO va pegado al volcado: cuando el TTL
+# expiraba 15 min después (02:30 frente a un volcado a las 02:15), el
+# despliegue del 2026-09-18 cambió la fórmula a media tarde, los items del
+# día (y su marcador SEED#) escritos con la fórmula anterior expiraron ANTES
+# del volcado, y el tramo de madrugada los volvió a sembrar como
+# placeholders → el Data Lake registró el día entero como cancelado. Un día
+# entero de margen absorbe además un volcado que falle y se reintente al día
+# siguiente. Coste despreciable: ~300 items/día en una tabla on-demand.
+STATE_TTL_CUTOFF_HHMM = os.environ.get("STATE_TTL_CUTOFF_HHMM", "01:30")
 STATE_TTL_MARGIN_DAYS = int(os.environ.get("STATE_TTL_MARGIN_DAYS", "1"))
 # Proporción de trenes marcados 'cancelado' en el volcado diario a partir de
 # la cual se avisa por email: una jornada de huelga real puede serlo, pero lo
@@ -151,19 +150,19 @@ metrics_table = dynamodb.Table(DYNAMODB_METRICS_TABLE)
 def _operational_date(now_local: datetime) -> date:
     """
     El día OPERATIVO de un ciclo de polling: coincide con el día calendario
-    salvo en el tramo de madrugada [00:00, NIGHT_TAIL_WINDOW_HOURS) hora de
+    salvo en el tramo de madrugada [00:00, NIGHT_TAIL_WINDOW_MINUTES) hora de
     Madrid, que sigue perteneciendo al día que acaba de terminar — ese tramo
     de polling extra existe precisamente para seguir comprobando trenes
     todavía en ruta cuando el último ciclo "normal" (23:59) los dejó sin
     resolver. Todo el estado en DynamoDB (pk, TTL) se indexa por este día
     operativo, no por now_local.date().
     """
-    if now_local.hour < NIGHT_TAIL_WINDOW_HOURS:
+    if now_local.hour * 60 + now_local.minute < NIGHT_TAIL_WINDOW_MINUTES:
         return now_local.date() - timedelta(days=1)
     return now_local.date()
 
 
-def _schedule_datetime(today: date, hhmm: str, tzinfo) -> datetime:
+def _schedule_datetime(today: date, hhmm: str, tzinfo, offset_dias: int = 0) -> datetime:
     """
     Construye un datetime absoluto para "HH:MM" anclado en `today` (el día
     OPERATIVO — ver _operational_date), no en now_local.date(). Reemplaza los
@@ -171,9 +170,14 @@ def _schedule_datetime(today: date, hhmm: str, tzinfo) -> datetime:
     madrugada, now_local ya está en el día calendario siguiente, así que
     anclar ahí daría una hora programada equivocada (un día adelantada) y
     rompería las comparaciones de cierre de ventana.
+
+    `offset_dias` son los días que esa hora de reloj va por delante del día
+    operativo (ver gtfs_schedule_builder._day_offset): 1 para la llegada de
+    un tren que sale a las 23:50 y llega pasada la medianoche, cuya hora
+    programada pertenece al día siguiente aunque el tren sea "de ayer".
     """
     h, m = map(int, hhmm.split(":"))
-    return datetime(today.year, today.month, today.day, h, m, tzinfo=tzinfo)
+    return datetime(today.year, today.month, today.day, h, m, tzinfo=tzinfo) + timedelta(days=offset_dias)
 
 
 def _get_pending_trains(today: date, trains_today: list[dict], log_extra: dict) -> list[dict]:
@@ -237,9 +241,9 @@ def lambda_handler(event, context):
         # de terminar y se sembró hace ~17 h; si su marcador SEED# no
         # estuviera, sembrar aquí no recupera nada, sino que reescribe el día
         # entero como placeholders sin entregar — justo lo que ocurrió el
-        # 2026-09-18, cuando el TTL antiguo (00:30) barrió el día a mitad del
-        # tramo de madrugada y el volcado de las 02:15 encontró trenes recién
-        # resembrados y los dio todos por cancelados.
+        # 2026-09-18, cuando el TTL antiguo barrió el día a mitad del tramo
+        # de madrugada y el volcado encontró trenes recién resembrados y los
+        # dio todos por cancelados.
         #
         # Tampoco se recalculan ventanas de apertura (ya no aplican a estas
         # horas): se sigue intentando cualquier tren de ayer sin resolver.
@@ -516,7 +520,8 @@ def _process_train(scheduled: dict, live: dict | None, today: date, now_local: d
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
     ult_retraso = _sanitize_retraso(
-        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], today, now_local, log_extra
+        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], today, now_local, log_extra,
+        scheduled.get("offset_dias_llegada", 0),
     )
     latitud = _to_decimal(live.get("latitud"))
     longitud = _to_decimal(live.get("longitud"))
@@ -595,7 +600,8 @@ def _process_madrid_train(scheduled: dict, live: dict | None, today: date, now_l
                 return False
 
             hora_llegada_programada = _schedule_datetime(
-                today, scheduled["hora_llegada_destino"], now_local.tzinfo
+                today, scheduled["hora_llegada_destino"], now_local.tzinfo,
+                scheduled.get("offset_dias_llegada", 0),
             )
             ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
             inicio_reintentos = hora_llegada_programada + timedelta(minutes=ult_retraso_conocido)
@@ -636,7 +642,8 @@ def _process_madrid_train(scheduled: dict, live: dict | None, today: date, now_l
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
     ult_retraso = _sanitize_retraso(
-        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], today, now_local, log_extra
+        cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], today, now_local, log_extra,
+        scheduled.get("offset_dias_llegada", 0),
     )
     latitud = _to_decimal(live.get("latitud"))
     longitud = _to_decimal(live.get("longitud"))
@@ -712,24 +719,25 @@ def _get_state(cod: str, today: date) -> dict | None:
 
 def _end_of_day_ttl(today: date) -> int:
     """
-    TTL en epoch seconds: NIGHT_TAIL_WINDOW_HOURS:30 del día siguiente a
-    `today` (hora local) MÁS STATE_TTL_MARGIN_DAYS días completos — p. ej.
-    las 02:30 de today+2 con los valores por defecto.
+    TTL en epoch seconds: STATE_TTL_CUTOFF_HHMM del día siguiente a `today`
+    (hora local) MÁS STATE_TTL_MARGIN_DAYS días completos — p. ej. la 01:30
+    de today+2 con los valores por defecto.
 
     El estado de un día solo hace falta hasta que daily_dump_handler lo
-    vuelca a S3 (02:15 del día siguiente), pero el margen es deliberadamente
+    vuelca a S3 (01:00 del día siguiente), pero el margen es deliberadamente
     generoso y no ajustado a esa hora: el barrido de TTL de DynamoDB es
     best-effort, el volcado puede fallar y reintentarse, y sobre todo un
     cambio de la propia fórmula del TTL desplegado a media tarde deja los
     items ya escritos ese día con el corte anterior — que es exactamente lo
-    que pasó el 2026-09-18 (ver STATE_TTL_MARGIN_DAYS). Con un día entero de
+    que pasó el 2026-09-18 (ver STATE_TTL_CUTOFF_HHMM). Con un día entero de
     margen, ninguno de esos tres casos puede hacer desaparecer el estado
     antes de volcarlo.
     """
     cutoff_day = today + timedelta(days=1 + STATE_TTL_MARGIN_DAYS)
+    hour, minute = (int(part) for part in STATE_TTL_CUTOFF_HHMM.split(":"))
     cutoff = datetime(
         cutoff_day.year, cutoff_day.month, cutoff_day.day,
-        hour=NIGHT_TAIL_WINDOW_HOURS, minute=30, second=0, microsecond=0,
+        hour=hour, minute=minute, second=0, microsecond=0,
         tzinfo=ZoneInfo("Europe/Madrid"),
     )
     return int(cutoff.timestamp())
@@ -879,7 +887,8 @@ def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
 
 
 def _sanitize_retraso(cod: str, sentido: str, ult_retraso: int, hora_referencia: str,
-                       today: date, now_local: datetime, log_extra: dict) -> int:
+                       today: date, now_local: datetime, log_extra: dict,
+                       offset_dias_referencia: int = 0) -> int:
     """
     Renfe ha reportado alguna vez un ultRetraso disparatado (p. ej. -562 min
     en flotaLD.json) — un fallo puntual de su servicio, no un tren circulando
@@ -890,12 +899,16 @@ def _sanitize_retraso(cod: str, sentido: str, ult_retraso: int, hora_referencia:
     propaga automáticamente a hora_llegada_corregida/hora_paso_zamora, que se
     calculan a partir de este mismo valor. `today` (día operativo) ancla esa
     hora programada vía _schedule_datetime — imprescindible en el tramo de
-    madrugada, donde now_local ya está en el día calendario siguiente.
+    madrugada, donde now_local ya está en el día calendario siguiente — y
+    offset_dias_referencia la sitúa en el día correcto si el tren cruza la
+    medianoche.
     """
     if ult_retraso >= NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES:
         return ult_retraso
 
-    hora_programada = _schedule_datetime(today, hora_referencia, now_local.tzinfo)
+    hora_programada = _schedule_datetime(
+        today, hora_referencia, now_local.tzinfo, offset_dias_referencia
+    )
     retraso_corregido = round((now_local - hora_programada).total_seconds() / 60)
 
     logger.warning(
@@ -1010,7 +1023,10 @@ def _resolve_expired_madrid_trains(today: date, now_local: datetime, trains_toda
         if not state or state.get("entregado"):
             continue
 
-        hora_llegada_programada = _schedule_datetime(today, train["hora_llegada_destino"], now_local.tzinfo)
+        hora_llegada_programada = _schedule_datetime(
+            today, train["hora_llegada_destino"], now_local.tzinfo,
+            train.get("offset_dias_llegada", 0),
+        )
         ult_retraso_conocido = int(state.get("ult_retraso", 0) or 0)
         window_end = hora_llegada_programada + timedelta(minutes=ult_retraso_conocido + 10)
 
@@ -1039,10 +1055,11 @@ def _resolve_expired_madrid_trains(today: date, now_local: datetime, trains_toda
 
 def daily_dump_handler(event, context):
     """
-    Lambda de volcado diario. Se ejecuta a las 02:15 (hora de Madrid), tras
+    Lambda de volcado diario. Se ejecuta a la 01:00 (hora de Madrid), tras
     el tramo de polling de madrugada del día anterior (ver
-    NIGHT_TAIL_WINDOW_HOURS/_operational_date) y antes de que el TTL de
-    DynamoDB (02:30) pueda barrer sus datos. Lee de DynamoDB todos los
+    NIGHT_TAIL_WINDOW_MINUTES/_operational_date) y con un día entero de
+    margen antes de que el TTL de DynamoDB (01:30 de fecha+2, ver
+    _end_of_day_ttl) pueda barrer sus datos. Lee de DynamoDB todos los
     trenes programados el día que acaba de terminar (sembrados por
     _seed_todays_trains, que crea un item por cada uno) y los escribe en un
     único fichero JSONL en S3.

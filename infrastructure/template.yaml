@@ -286,7 +286,7 @@ Resources:
       # del horario del día; el volcado del Data Lake lo sigue haciendo
       # DailyDumpFunction una vez al día.
       Description: >
-        Ejecutada cada 5 min, 07:00-23:59 y 00:00-01:59 (madrugada, para
+        Ejecutada cada 5 min, 07:00-23:59 y 00:00-00:25 (madrugada, para
         trenes muy retrasados). Resuelve el horario de hoy (GTFS/S3 o
         fallback), consulta flotaLD.json y actualiza cada tren en DynamoDB.
       # Margen sobre los valores por defecto (Timeout: 60, MemorySize: 256)
@@ -348,26 +348,27 @@ Resources:
             FlexibleTimeWindow:
               Mode: "OFF"
             Description: "Polling cada 5 minutos entre las 23:00 y las 23:59 (hora de Madrid)"
-        # Tramo de madrugada [00:00, 02:00) — motivado por un tren que llegó
+        # Tramo de madrugada [00:00, 00:30) — motivado por un tren que llegó
         # a las 23:26 y casi se sale de margen: un tren muy retrasado puede
         # seguir en ruta después de las 23:59, y sin este tramo se perdería
         # (marcado 'cancelado' en el volcado diario aunque solo llegara
-        # tarde). Debe coincidir con NIGHT_TAIL_WINDOW_HOURS=2 en handler.py
-        # (_operational_date). El volcado diario de más abajo corre a las
-        # 02:15, justo después de este tramo; el TTL del estado en DynamoDB
-        # ya no va pegado a esa hora (deja un día entero de margen — ver
-        # STATE_TTL_MARGIN_DAYS en handler.py), porque ese margen de 15 min
-        # fue justo lo que se perdió el 2026-09-18 al cambiar la fórmula del
-        # TTL a media tarde.
+        # tarde). Debe coincidir con NIGHT_TAIL_WINDOW_MINUTES=30 en
+        # handler.py (_operational_date): el último ciclo es el de las 00:25,
+        # porque a las 00:30 el día operativo ya sería el nuevo. El volcado
+        # diario de más abajo corre a la 01:00, justo después de este tramo;
+        # el TTL del estado en DynamoDB no va pegado a esa hora (deja un día
+        # entero de margen — ver STATE_TTL_CUTOFF_HHMM/STATE_TTL_MARGIN_DAYS
+        # en handler.py), porque un margen de minutos fue justo lo que se
+        # perdió el 2026-09-18 al cambiar la fórmula del TTL a media tarde.
         ScheduleEvery5MinNightTail:
           Type: ScheduleV2
           Properties:
             Name: !Sub "zamora-train-tracker-poll-nighttail-${Environment}"
-            ScheduleExpression: "cron(0,5,10,15,20,25,30,35,40,45,50,55 0-1 * * ? *)"
+            ScheduleExpression: "cron(0,5,10,15,20,25 0 * * ? *)"
             ScheduleExpressionTimezone: "Europe/Madrid"
             FlexibleTimeWindow:
               Mode: "OFF"
-            Description: "Polling cada 5 minutos entre las 00:00 y las 01:59 (hora de Madrid), trenes muy retrasados"
+            Description: "Polling cada 5 minutos entre las 00:00 y las 00:25 (hora de Madrid), trenes muy retrasados"
       Tags:
         Project: ZamoraTrainObservability
         Environment: !Ref Environment
@@ -380,7 +381,7 @@ Resources:
       CodeUri: ../lambdas/train_tracker/
       Handler: handler.daily_dump_handler
       Description: >
-        Ejecutada una vez al día a las 02:15 (hora de Madrid), tras el tramo
+        Ejecutada una vez al día a la 01:00 (hora de Madrid), tras el tramo
         de polling de madrugada. Vuelca a S3 los trenes del día anterior y
         actualiza (best-effort) las métricas precalculadas en TrainMetricsTable.
       Environment:
@@ -407,11 +408,11 @@ Resources:
           Type: ScheduleV2
           Properties:
             Name: !Sub "zamora-daily-dump-${Environment}"
-            ScheduleExpression: "cron(15 2 * * ? *)"
+            ScheduleExpression: "cron(0 1 * * ? *)"
             ScheduleExpressionTimezone: "Europe/Madrid"
             FlexibleTimeWindow:
               Mode: "OFF"
-            Description: "Volcado diario a S3, 02:15 hora de Madrid (el TTL de DynamoDB deja un día entero de margen)"
+            Description: "Volcado diario a S3, 01:00 hora de Madrid (el TTL de DynamoDB deja un día entero de margen)"
       Tags:
         Project: ZamoraTrainObservability
         Environment: !Ref Environment

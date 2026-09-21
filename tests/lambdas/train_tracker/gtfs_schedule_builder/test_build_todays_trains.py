@@ -27,8 +27,22 @@ class TestBuildTodaysTrains(unittest.TestCase):
                 "weekdays": [0, 1, 2, 3, 4],
                 "hora_salida": "07:41",
                 "hora_llegada_destino": "08:49",
+                "offset_dias_salida": 0,
+                "offset_dias_llegada": 0,
             },
         )
+
+    def test_train_arriving_past_midnight_keeps_the_day_it_belongs_to(self):
+        # TRIP_MNIGHT llega a Chamartín a las "24:10" en GTFS: la hora de
+        # reloj es 00:10, pero de un día después que la salida. Sin ese
+        # offset, ScheduleMatcher cerraría su ventana a las 00:20 del mismo
+        # día de la salida y el tren se volcaría siempre como 'cancelado'.
+        train = self._by_cod(self._build(MONDAY), "04777")
+
+        self.assertEqual(train["hora_salida"], "23:05")
+        self.assertEqual(train["offset_dias_salida"], 0)
+        self.assertEqual(train["hora_llegada_destino"], "00:10")
+        self.assertEqual(train["offset_dias_llegada"], 1)
 
     def test_galicia_train_only_active_on_its_calendar_dates_exception(self):
         monday_trains = self._build(MONDAY)

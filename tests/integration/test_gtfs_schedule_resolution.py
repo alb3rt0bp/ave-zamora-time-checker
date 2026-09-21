@@ -47,8 +47,9 @@ class TestGtfsScheduleResolutionHappyPath(HandlerTestCase):
         self.assertEqual(result["statusCode"], 200)
 
         # 04154 (TRIP_M1) y 04999 (TRIP_D1/TRIP_D2 deduplicados) son los
-        # únicos trenes activos en MONDAY (laborable) del fixture GTFS — ver
-        # tests/dummies/gtfs_samples.py.
+        # trenes activos en MONDAY (laborable) del fixture GTFS — ver
+        # tests/dummies/gtfs_samples.py (04777 es el nocturno que llega
+        # pasada la medianoche).
         m1 = self.get_item("04154", "2026-01-05")
         m999 = self.get_item("04999", "2026-01-05")
         self.assertIsNotNone(m1)
@@ -60,7 +61,7 @@ class TestGtfsScheduleResolutionHappyPath(HandlerTestCase):
 
         cached = self.s3.get_object(Bucket=self.handler.S3_BUCKET, Key="schedules/2026-01-05.json")
         cached_trains = {t["cod_comercial"] for t in json.loads(cached["Body"].read())["trains"]}
-        self.assertEqual(cached_trains, {"04154", "04999"})
+        self.assertEqual(cached_trains, {"04154", "04999", "04777"})
 
         self.assertEqual(self.get_published_data_quality_alerts(), [])
 

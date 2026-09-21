@@ -96,7 +96,37 @@ def resolve_todays_schedule(
 def _with_window(static_fallback: dict, trains: list[dict]) -> dict:
     return {
         "polling_window_minutes": static_fallback.get("polling_window_minutes", 30),
-        "trains": trains,
+        "trains": [_with_day_offsets(train) for train in trains],
+    }
+
+
+def _with_day_offsets(train: dict) -> dict:
+    """
+    Garantiza que todo tren lleve offset_dias_salida/offset_dias_llegada, los
+    dos campos con los que ScheduleMatcher y handler._schedule_datetime sitúan
+    una hora en el día correcto cuando el trayecto cruza la medianoche.
+
+    Los trenes resueltos desde GTFS ya los traen explícitos (ver
+    gtfs_schedule_builder._day_offset) y aquí no se tocan. Los que vienen del
+    fichero estático de reserva —o de una caché en S3 escrita antes de que
+    estos campos existieran— solo tienen horas de reloj, así que la llegada
+    se deduce de la única pista disponible: si es ANTERIOR a la salida, el
+    tren ha cruzado la medianoche. No hay falsos positivos posibles (ningún
+    tren llega antes de salir) y la salida se queda en 0, que es lo correcto
+    salvo para trayectos que empiezan después de medianoche — un caso que
+    GTFS sí sabe expresar y que este fichero estático nunca ha representado.
+    """
+    if "offset_dias_llegada" in train and "offset_dias_salida" in train:
+        return train
+
+    hora_salida = train.get("hora_salida", "")
+    hora_llegada = train.get("hora_llegada_destino", "")
+    cruza_medianoche = bool(hora_salida and hora_llegada and hora_llegada < hora_salida)
+
+    return {
+        **train,
+        "offset_dias_salida": train.get("offset_dias_salida", 0),
+        "offset_dias_llegada": train.get("offset_dias_llegada", 1 if cruza_medianoche else 0),
     }
 
 

@@ -25,6 +25,10 @@ y SUNDAY (2026-01-04, "domingo") de tests/dummies/reference_dates.py:
   (exception_type=2) → debe excluirse pese al calendario.
 - TRIP_OUTOFRANGE (cod_comercial 04333): servicio SVC_OUTOFRANGE, activo por
   patrón semanal pero con start_date/end_date que no cubren MONDAY/SUNDAY.
+- TRIP_MNIGHT (cod_comercial 04777, Madrid): sale de Zamora a las 23:05 y
+  llega a Chamartín a las "24:10", la forma que tiene GTFS de expresar las
+  00:10 del día siguiente. Sirve para comprobar que la hora de reloj y el
+  día al que pertenece viajan por separado (ver _day_offset).
 """
 
 ZAMORA_CODE = "30200"
@@ -46,6 +50,8 @@ TRIP_REMOVED,7:00:00,7:02:00,30200,01,,0,0,
 TRIP_REMOVED,8:00:00,8:00:00,17000,02,,1,0,
 TRIP_OUTOFRANGE,7:00:00,7:02:00,30200,01,,0,0,
 TRIP_OUTOFRANGE,8:00:00,8:00:00,17000,02,,1,0,
+TRIP_MNIGHT,23:03:00,23:05:00,30200,04,,0,0,
+TRIP_MNIGHT,24:10:00,24:10:00,17000,05,,1,0,
 """
 
 TRIPS_CSV = """route_id,service_id,trip_id,trip_headsign,trip_short_name,direction_id,block_id,shape_id,wheelchair_accessible
@@ -57,6 +63,7 @@ R4,SVC_LABORABLE,TRIP_NOCHAM,,04001,,,,1
 R5,SVC_LABORABLE,TRIP_NOSHORTNAME,,,,,,1
 R6,SVC_REMOVED_TODAY,TRIP_REMOVED,,04222,,,,1
 R7,SVC_OUTOFRANGE,TRIP_OUTOFRANGE,,04333,,,,1
+R8,SVC_LABORABLE,TRIP_MNIGHT,,04777,,,,1
 """
 
 CALENDAR_CSV = """service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date

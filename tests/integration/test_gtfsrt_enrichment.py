@@ -54,7 +54,7 @@ class TestGtfsrtEnrichmentHappyPath(HandlerTestCase):
         self.assertEqual(item["hora_paso_zamora_gtfsrt"], "08:34")
 
         next_day = MONDAY + timedelta(days=1)
-        frozen_dump = make_frozen_datetime(madrid_time_to_utc(next_day, 0, 15))
+        frozen_dump = make_frozen_datetime(madrid_time_to_utc(next_day, 1, 0))
         with patch("handler.datetime", frozen_dump):
             dump_result = self.handler.daily_dump_handler({}, FakeContext())
 
@@ -99,7 +99,7 @@ class TestGtfsrtEnrichmentFailureIsolation(HandlerTestCase):
         self.assertNotIn("hora_paso_zamora_gtfsrt", item)
 
         next_day = MONDAY + timedelta(days=1)
-        frozen_dump = make_frozen_datetime(madrid_time_to_utc(next_day, 0, 15))
+        frozen_dump = make_frozen_datetime(madrid_time_to_utc(next_day, 1, 0))
         with patch("handler.datetime", frozen_dump):
             dump_result = self.handler.daily_dump_handler({}, FakeContext())
 

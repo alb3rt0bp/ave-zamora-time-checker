@@ -7,7 +7,7 @@ from tests.dummies.handler_test_case import HandlerTestCase
 from tests.dummies.frozen_datetime import make_frozen_datetime
 from tests.dummies.time_utils import madrid_time_to_utc
 
-# El dump corre poco después de medianoche y vuelca el día ANTERIOR.
+# El dump corre a la 01:00, tras el tramo de madrugada, y vuelca el día ANTERIOR.
 DUMP_RUN_DAY = date(2026, 1, 6)  # martes
 TARGET_DAY = date(2026, 1, 5)    # lunes (el día que se vuelca)
 
@@ -34,7 +34,7 @@ class TestDailyDumpHandler(HandlerTestCase):
         self.table.delete_item(Key={"pk": f"SEED#{fecha.isoformat()}"})
 
     def _frozen(self):
-        return make_frozen_datetime(madrid_time_to_utc(DUMP_RUN_DAY, 0, 15))
+        return make_frozen_datetime(madrid_time_to_utc(DUMP_RUN_DAY, 1, 0))
 
     def test_no_records_writes_nothing(self):
         with patch("handler.datetime", self._frozen()):

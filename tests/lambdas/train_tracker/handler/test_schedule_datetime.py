@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from tests.dummies.handler_test_case import HandlerTestCase
@@ -23,6 +23,23 @@ class TestScheduleDatetime(HandlerTestCase):
 
         self.assertEqual(result.date(), MONDAY)
         self.assertEqual(result.strftime("%H:%M"), "23:07")
+
+    def test_offset_dias_moves_the_hour_to_the_following_day(self):
+        # La llegada de un tren que sale a las 23:05 y llega a las 00:10
+        # pertenece al día SIGUIENTE al día operativo (offset_dias=1). Sin
+        # esto, su ventana se compararía contra las 00:10 del propio día
+        # operativo, ~24 h antes de tiempo.
+        result = self.handler._schedule_datetime(MONDAY, "00:10", TZ, 1)
+
+        self.assertEqual(result, datetime(MONDAY.year, MONDAY.month, MONDAY.day, 0, 10, tzinfo=TZ)
+                         + timedelta(days=1))
+        self.assertEqual(result.strftime("%H:%M"), "00:10")
+
+    def test_offset_dias_defaults_to_the_operational_day(self):
+        self.assertEqual(
+            self.handler._schedule_datetime(MONDAY, "08:30", TZ),
+            self.handler._schedule_datetime(MONDAY, "08:30", TZ, 0),
+        )
 
     def test_arithmetic_on_the_result_rolls_over_to_the_next_day_correctly(self):
         from datetime import timedelta

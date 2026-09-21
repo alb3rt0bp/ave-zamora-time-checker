@@ -10,6 +10,13 @@ Ventana según sentido:
   - Galicia: desde (hora_salida - 1h) sin límite superior; se deja de
              considerar activo cuando el estado en DynamoDB queda 'done'
              (capturado en Zamora).
+
+Las horas son de reloj ("HH:MM"), así que cada una viene acompañada de
+offset_dias_salida/offset_dias_llegada: los días que hay que sumarle para
+situarla en el día real (ver gtfs_schedule_builder._day_offset y
+schedule_resolver._with_day_offsets). Sin ellos, un tren que sale a las 23:50
+y llega a las 00:40 del día siguiente tendría su ventana cerrada a las 00:50
+del día en que salió — es decir, cerrada desde el principio del día.
 """
 
 import logging
@@ -19,6 +26,17 @@ from typing import Callable, Optional
 
 logger = logging.getLogger(f"train_tracker.{__name__}")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
+
+
+def _anchored(now: datetime, hhmm: str, offset_dias: int) -> datetime:
+    """
+    "HH:MM" -> datetime absoluto en el día de `now` más `offset_dias`. La
+    suma se hace sobre la hora local (aritmética de calendario, no de 24 h
+    exactas), así que un cambio de hora CET/CEST de por medio no desplaza la
+    hora programada.
+    """
+    h, m = map(int, hhmm.split(":"))
+    return now.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(days=offset_dias)
 
 
 class ScheduleMatcher:
@@ -90,8 +108,7 @@ class ScheduleMatcher:
           - Madrid:  hora_llegada_destino + último retraso conocido + 10 min.
           - Galicia: sin cierre por tiempo (lo detiene el estado 'done').
         """
-        h, m = map(int, train["hora_salida"].split(":"))
-        salida = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        salida = _anchored(now, train["hora_salida"], train.get("offset_dias_salida", 0))
         window_start = salida - timedelta(hours=1)
 
         if now < window_start:
@@ -100,8 +117,9 @@ class ScheduleMatcher:
         if train["sentido"] != "Madrid":
             return True
 
-        hh, mm = map(int, train["hora_llegada_destino"].split(":"))
-        llegada_programada = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        llegada_programada = _anchored(
+            now, train["hora_llegada_destino"], train.get("offset_dias_llegada", 0)
+        )
 
         ult_retraso = 0
         if state_lookup is not None:

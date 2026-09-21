@@ -43,7 +43,7 @@ Lambda poll+reencola    →    Lambda stateless con lógica de ventana
 │  ┌──────────────┐     ┌─────────────────┐     ┌──────────────────┐        │
 │  │  EventBridge │     │   Lambda        │     │   DynamoDB       │        │
 │  │  Scheduler   │────▶│  train-tracker  │────▶│  train-state     │        │
-│  │  (cada 5')   │     │  (arm64/py3.12) │     │  (TTL 02:30      │        │
+│  │  (cada 5')   │     │  (arm64/py3.12) │     │  (TTL 01:30      │        │
 │  └──────────────┘     └────────┬────────┘     │   de fecha+2)    │        │
 │                                │               └────────┬─────────┘        │
 │                                ▼                        │                  │
@@ -52,7 +52,7 @@ Lambda poll+reencola    →    Lambda stateless con lógica de ventana
 │                       │  (Renfe API)   │     ┌──────────────────┐          │
 │                       └────────────────┘     │  EventBridge     │          │
 │  (sin escritura a S3 durante el polling)     │  Scheduler       │          │
-│                                               │  (02:15, 1×/día) │          │
+│                                               │  (01:00, 1×/día) │          │
 │                                               └────────┬─────────┘          │
 │                                                        ▼                    │
 │                                               ┌──────────────────┐          │
@@ -255,6 +255,7 @@ ave-zamora-time-checker/
 │   ├── compile_schedules.py           # CSVs → config/train_schedules.json
 │   ├── backfill_metrics.py            # Reprocesa el histórico de S3 contra MetricsWriter
 │   ├── backfill_delay_histograms.py   # Siembra histograma_retraso en los items TRAIN#
+│   ├── extend_state_ttl.py            # Alarga el TTL de un día en TrainStateTable (transición)
 │   └── query_examples.sql             # Queries Athena de ejemplo
 └── .github/workflows/
     └── deploy.yml                     # CI/CD: deploy automático del backend a AWS
@@ -325,18 +326,19 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
   lifecycle (→ Standard-IA a 30 días, → Glacier-IR a 90). EventBridge habilitado
   para notificar nuevos objetos.
 - **DynamoDB `zamora-train-state`** — on-demand (PAY_PER_REQUEST), TTL hasta las
-  02:30 de fecha+2 (`STATE_TTL_MARGIN_DAYS`: un día entero de margen tras el
-  volcado diario), Point-in-Time Recovery. Clave simple `pk = {cod}#{fecha}`.
+  01:30 de fecha+2 (`STATE_TTL_CUTOFF_HHMM` / `STATE_TTL_MARGIN_DAYS`: un día
+  entero de margen tras el volcado diario), Point-in-Time Recovery. Clave
+  simple `pk = {cod}#{fecha}`.
   El margen es deliberadamente holgado: cuando el TTL expiraba 15 min después
   del volcado, un cambio de la propia fórmula desplegado a media tarde
   (2026-09-18) dejó los items de ese día expirando antes de volcarse.
 - **Lambda `train-tracker`** — arm64/Graviton2, Python 3.12, 256 MB, timeout 60s.
   Disparada por EventBridge Scheduler cada 5 min entre las 07:00-23:59 y, en un
-  tramo extra de madrugada, 00:00-01:59 (para trenes muy retrasados que aún
+  tramo extra de madrugada, 00:00-00:25 (para trenes muy retrasados que aún
   siguen en ruta). Siembra los trenes del día en el primer ciclo y actualiza su
   estado en DynamoDB; no escribe en S3.
 - **Lambda `daily-dump`** — arm64/Graviton2, Python 3.12. Disparada una vez al
-  día a las 02:15 (hora de Madrid), tras el tramo de madrugada. Escanea
+  día a la 01:00 (hora de Madrid), tras el tramo de madrugada. Escanea
   DynamoDB, coge los trenes del día anterior marcados como `entregado` y
   escribe un único fichero JSONL en S3. Antes de escribir nada comprueba el
   marcador `SEED#{fecha}` del día: si falta, o se sembró otro día (día
@@ -399,6 +401,9 @@ Athena sin capa gratuita, menos objetos = menos overhead por consulta.
 | `GtfsZipUrl` | `GTFS_ZIP_URL` | URL del GTFS estático | Usado por la resolución diaria del horario desde GTFS |
 | — | `CLAUDE_MODEL_ID` | `global.anthropic.claude-sonnet-5` | Fijo en `template.yaml` (no es parámetro de stack: mismo modelo en todos los entornos) — modelo Bedrock (inference profile) usado por `tweet_notifier` |
 | — | `GTFS_SCHEDULE_ENABLED` | `true` | Fijo en `template.yaml` (no es parámetro de stack): resuelve el horario del día desde el GTFS estático de Renfe en vez de `train_schedules.json` (fallback si falla) |
+| — | `NIGHT_TAIL_WINDOW_MINUTES` | `30` | Minutos tras medianoche que siguen perteneciendo al día operativo anterior. Debe ir en sintonía con el cron `ScheduleNightTail` y con la hora del volcado |
+| — | `STATE_TTL_CUTOFF_HHMM` / `STATE_TTL_MARGIN_DAYS` | `01:30` / `1` | Hora y días de margen del TTL del estado en DynamoDB (por defecto, 01:30 de fecha+2) |
+| `MaxCancelledRatioAlert` | `MAX_CANCELLED_RATIO_ALERT` | `0.5` | Proporción de cancelados en el volcado diario a partir de la cual avisa por email |
 | — | `XFETCH_TRENDS_ENABLED` | `true` | Activa el enriquecimiento con tendencias reales de xfetch.io en `tweet_notifier` |
 
 ---
