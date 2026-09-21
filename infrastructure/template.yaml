@@ -462,7 +462,7 @@ Resources:
       Environment:
         Variables:
           X_API_CREDENTIALS_SECRET_ARN: !Ref XApiCredentialsSecret
-          CLAUDE_MODEL_ID: "global.anthropic.claude-sonnet-5"
+          CLAUDE_MODEL_ID: "eu.anthropic.claude-sonnet-5"
           DELAY_ALERT_THRESHOLD_MINUTES: !Ref DelayAlertThresholdMinutes
           TRENDS_ENABLED: "true"
       Policies:
@@ -479,7 +479,7 @@ Resources:
             - Effect: Allow
               Action: bedrock:InvokeModel
               Resource:
-                - !Sub "arn:aws:bedrock:${AwsRegion}:${AWS::AccountId}:inference-profile/global.anthropic.claude-sonnet-5"
+                - !Sub "arn:aws:bedrock:${AwsRegion}:${AWS::AccountId}:inference-profile/eu.anthropic.claude-sonnet-5"
                 - "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-5"
             # Los modelos de Anthropic en Bedrock están sujetos a suscripción
             # de AWS Marketplace por debajo: sin estos dos permisos, la

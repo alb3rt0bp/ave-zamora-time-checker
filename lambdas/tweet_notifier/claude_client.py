@@ -24,7 +24,7 @@ import trends_reader
 logger = logging.getLogger(f"tweet_notifier.{__name__}")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "global.anthropic.claude-sonnet-5")
+CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "eu.anthropic.claude-sonnet-5")
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
 TRENDS_ENABLED = os.environ.get("TRENDS_ENABLED", "true").lower() == "true"
 ANTHROPIC_VERSION = "bedrock-2023-05-31"
