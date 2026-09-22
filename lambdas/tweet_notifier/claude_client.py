@@ -28,6 +28,7 @@ CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "global.anthropic.claude-son
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
 TRENDS_ENABLED = os.environ.get("TRENDS_ENABLED", "true").lower() == "true"
 ANTHROPIC_VERSION = "bedrock-2023-05-31"
+MAX_TWEET_LENGTH = 280
 
 bedrock_runtime = boto3.client("bedrock-runtime")
 
@@ -90,10 +91,21 @@ natural con el mensaje — nunca en sustitución del hashtag reivindicativo \
 obligatorio, pero siempre incluir un hashtag tendencia. Si no se incluye ninguna lista,\
 no fuerces nada. No es obligatorio usar un hashtag tendencia, no buscamos que se nos acuse de oportunistas o spam
 
-Es importante mencionar que el limite de 280 caracteres es un limite duro, por lo que en la salida, la suma de la \
-suma de los campos `tweet_text`y `hastags` no pueden superar los 280 caracteres. El campo `hashtags` debe \
-permanecer inmutable, por lo que ajusta el campo `tweet_text` para que tenga una longitud igual o inferior a 275 menos\
-La longitud de los hashtags
+Cálculo EXACTO del límite de 280 caracteres — LÍMITE DURO, no orientativo, se descarta cualquier \
+respuesta que lo supere: al publicarse, el tuit final se compone como `tweet_text` + dos saltos de \
+línea (2 caracteres) + los elementos de `hashtags` unidos por un espacio simple. Es decir:
+
+longitud_total = longitud(tweet_text) + 2 + longitud(" ".join(hashtags))
+
+longitud_total no puede superar 280 en ningún caso. Antes de responder, calcula longitud_total mentalmente \
+y, si se pasa, recorta `tweet_text` — nunca los hashtags — hasta que quepa. Las cuentas mencionadas \
+(@Renfe, @Adif_es, etc.) forman parte de `tweet_text` y cuentan como texto normal, carácter a carácter, \
+sin ningún acortamiento automático: inclúyelas en el cálculo igual que el resto del mensaje.
+
+El campo `hashtags` es el que tú eliges libremente (ver instrucciones de hashtags más arriba) SALVO cuando \
+el mensaje del usuario indique explícitamente que ya hay unos hashtags fijados que no deben cambiar (esto \
+ocurre solo cuando se te pide acortar un tuit ya redactado que superó el límite) — en ese caso, y solo en \
+ese caso, devuelve `hashtags` exactamente igual a como se te dio y ajusta únicamente `tweet_text`.
 """
 
 
@@ -140,12 +152,38 @@ def _build_user_message(alert: dict, trending_hashtags: list) -> str:
     return message
 
 
-def draft_tweet(alert: dict, log_extra: dict) -> dict:
+def tweet_length(tweet_text: str, hashtags: list) -> int:
+    """Longitud total del tuit tal y como se publica: texto + línea en blanco + hashtags."""
+    return len(f"{tweet_text}\n\n{' '.join(hashtags)}")
+
+
+def _invoke_claude(body: str, cod_comercial: str | None) -> dict:
     """
-    Devuelve {"tweet_text": str, "hashtags": [str, ...]} para el tren dado.
+    Llama a Bedrock y devuelve el {tweet_text, hashtags} redactado por Claude.
     Lanza excepción si Claude no ha podido redactar (refusal u otro
     stop_reason distinto de "end_turn", o una respuesta sin bloque de texto).
     """
+    response = bedrock_runtime.invoke_model(modelId=CLAUDE_MODEL_ID, body=body)
+    response_body = json.loads(response["body"].read())
+
+    if response_body.get("stop_reason") != "end_turn":
+        raise RuntimeError(
+            f"Claude no ha redactado el tuit para {cod_comercial} "
+            f"(stop_reason={response_body.get('stop_reason')})"
+        )
+
+    text_blocks = [
+        block["text"] for block in response_body.get("content", [])
+        if block.get("type") == "text"
+    ]
+    if not text_blocks:
+        raise RuntimeError(f"Respuesta de Claude sin bloque de texto para {cod_comercial}")
+
+    return json.loads(text_blocks[-1])
+
+
+def draft_tweet(alert: dict, log_extra: dict) -> dict:
+    """Devuelve {"tweet_text": str, "hashtags": [str, ...]} para el tren dado."""
     trending_hashtags = trends_reader.get_trending_hashtags(log_extra) if TRENDS_ENABLED else []
     logger.debug(f'Trending hahses: {trending_hashtags}', extra=log_extra)
     prompt = _build_user_message(alert, trending_hashtags)
@@ -158,25 +196,7 @@ def draft_tweet(alert: dict, log_extra: dict) -> dict:
         "messages": [{"role": "user", "content": prompt}],
     })
 
-    response = bedrock_runtime.invoke_model(modelId=CLAUDE_MODEL_ID, body=body)
-    response_body = json.loads(response["body"].read())
-
-    if response_body.get("stop_reason") != "end_turn":
-        raise RuntimeError(
-            f"Claude no ha redactado el tuit para {alert.get('cod_comercial')} "
-            f"(stop_reason={response_body.get('stop_reason')})"
-        )
-
-    text_blocks = [
-        block["text"] for block in response_body.get("content", [])
-        if block.get("type") == "text"
-    ]
-    if not text_blocks:
-        raise RuntimeError(
-            f"Respuesta de Claude sin bloque de texto para {alert.get('cod_comercial')}"
-        )
-
-    result = json.loads(text_blocks[-1])
+    result = _invoke_claude(body, alert.get("cod_comercial"))
     hashtags = result["hashtags"]
     if ADVOCACY_HASHTAGS.isdisjoint(hashtags):
         logger.warning(
@@ -186,3 +206,41 @@ def draft_tweet(alert: dict, log_extra: dict) -> dict:
         hashtags.append("#TrenMadrugadorYa")
 
     return {"tweet_text": result["tweet_text"], "hashtags": hashtags}
+
+
+def refine_tweet(alert: dict, drafted: dict, log_extra: dict) -> dict:
+    """
+    Pide a Claude que reescriba únicamente `tweet_text`, más corto, para que
+    el tuit completo quepa en MAX_TWEET_LENGTH caracteres. Los hashtags ya
+    elegidos por draft_tweet se dejan intactos — solo se cuentan para
+    calcular el presupuesto de caracteres disponible para el texto.
+    """
+    hashtags = drafted["hashtags"]
+    current_length = tweet_length(drafted["tweet_text"], hashtags)
+    text_budget = MAX_TWEET_LENGTH - len(f"\n\n{' '.join(hashtags)}")
+    prompt = (
+        f"El tuit que has redactado para el tren {alert.get('cod_comercial')} ocupa "
+        f"{current_length} caracteres y supera el límite de {MAX_TWEET_LENGTH}.\n"
+        f"tweet_text actual: {drafted['tweet_text']}\n"
+        f"Los hashtags ya están decididos y no deben cambiar: {' '.join(hashtags)}\n"
+        f"Redacta de nuevo únicamente el campo tweet_text, manteniendo el mensaje y el "
+        f"tono, de forma que no supere los {text_budget} caracteres (así el texto y los "
+        f"hashtags juntos quepan en {MAX_TWEET_LENGTH}). Devuelve también el campo "
+        f"hashtags, sin modificarlo."
+    )
+    body = json.dumps({
+        "anthropic_version": ANTHROPIC_VERSION,
+        "max_tokens": 1024,
+        "system": SYSTEM_PROMPT,
+        "output_config": {"format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
+        "messages": [{"role": "user", "content": prompt}],
+    })
+
+    result = _invoke_claude(body, alert.get("cod_comercial"))
+    refined = {"tweet_text": result["tweet_text"], "hashtags": hashtags}
+    logger.info(
+        "Tuit para %s refinado: %d -> %d caracteres",
+        alert.get("cod_comercial"), current_length,
+        tweet_length(refined["tweet_text"], hashtags), extra=log_extra,
+    )
+    return refined
