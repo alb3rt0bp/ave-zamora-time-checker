@@ -82,6 +82,14 @@ TRAIN_M100_EN_CHAMARTIN_CON_RETRASO_NEGATIVO_ANOMALO = {
     "ultRetraso": -562,
 }
 
+# Tren G100 aún en ruta (no ha pasado por Zamora) con un ultRetraso
+# disparatado, para probar que _sanitize_retraso no reenvía el email de
+# alerta en cada ciclo de 5 min mientras la anomalía persiste.
+TRAIN_G100_EN_RUTA_CON_RETRASO_NEGATIVO_ANOMALO = {
+    **TRAIN_G100_EN_RUTA,
+    "ultRetraso": -562,
+}
+
 FLOTA_RESPONSE_SAMPLE = [TRAIN_M100_EN_RUTA, TRAIN_G100_EN_RUTA]
 
 TRENES_CON_ESTACIONES_SAMPLE = {

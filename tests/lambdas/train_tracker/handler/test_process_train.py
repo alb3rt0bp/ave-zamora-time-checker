@@ -7,6 +7,7 @@ from tests.dummies.log_extra import SAMPLE_LOG_EXTRA
 from tests.dummies.reference_dates import MONDAY
 from tests.dummies.renfe_samples import (
     TRAIN_G100_EN_RUTA,
+    TRAIN_G100_EN_RUTA_CON_RETRASO_NEGATIVO_ANOMALO,
     TRAIN_G100_EN_ZAMORA,
     TRAIN_G100_EN_ZAMORA_CON_RETRASO,
     TRAIN_G100_EN_ZAMORA_CON_RETRASO_NEGATIVO_ANOMALO,
@@ -109,6 +110,26 @@ class TestProcessTrain(HandlerTestCase):
         [alert] = self.get_published_data_quality_alerts()
         self.assertIn("G100", alert["subject"])
         self.assertIn("-562", alert["message"])
+
+    def test_galicia_anomalous_negative_delay_alert_is_not_repeated_across_cycles(self):
+        # El tren sigue en ruta (no llega a Zamora) y Renfe sigue reportando
+        # el mismo ultRetraso disparatado ciclo tras ciclo: solo debe mandarse
+        # un email, en el primer ciclo en que se detecta.
+        self.handler._process_train(
+            GALICIA_SCHEDULED, TRAIN_G100_EN_RUTA_CON_RETRASO_NEGATIVO_ANOMALO, TODAY, NOW, SAMPLE_LOG_EXTRA
+        )
+        self.assertTrue(self.get_item("G100", NOW.date().isoformat())["retraso_anomalo_alertado"])
+
+        # Segundo ciclo, 5 min después, misma anomalía persistente.
+        self.handler._process_train(
+            GALICIA_SCHEDULED, TRAIN_G100_EN_RUTA_CON_RETRASO_NEGATIVO_ANOMALO, TODAY,
+            NOW + timedelta(minutes=5), SAMPLE_LOG_EXTRA,
+        )
+
+        # get_published_data_quality_alerts() consume la cola: al leerla una
+        # sola vez al final debe seguir habiendo solo el mensaje del primer
+        # ciclo, no uno por cada uno de los dos ciclos.
+        self.assertEqual(len(self.get_published_data_quality_alerts()), 1)
 
     def test_galicia_ult_retraso_stays_consistent_with_hora_llegada_corregida_across_cycles(self):
         # Regresión: un ciclo anterior deja ult_retraso=2 en Dynamo (vía

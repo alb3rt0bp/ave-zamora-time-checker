@@ -519,9 +519,10 @@ def _process_train(scheduled: dict, live: dict | None, today: date, now_local: d
 
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
-    ult_retraso = _sanitize_retraso(
+    ult_retraso, retraso_anomalo_alertado = _sanitize_retraso(
         cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], today, now_local, log_extra,
         scheduled.get("offset_dias_llegada", 0),
+        ya_alertado=bool(state and state.get("retraso_anomalo_alertado")),
     )
     latitud = _to_decimal(live.get("latitud"))
     longitud = _to_decimal(live.get("longitud"))
@@ -552,7 +553,10 @@ def _process_train(scheduled: dict, live: dict | None, today: date, now_local: d
         return True
 
     # ── Todavía no ha llegado: actualizar estado en DynamoDB ─────────────────
-    _update_state(cod, scheduled, ult_retraso, today, now_local, latitud=latitud, longitud=longitud)
+    _update_state(
+        cod, scheduled, ult_retraso, today, now_local, latitud=latitud, longitud=longitud,
+        retraso_anomalo_alertado=retraso_anomalo_alertado,
+    )
     logger.info(
         "Tren %s aún no en Zamora (última est: %s, retraso: %d min)",
         cod, cod_est_ant, ult_retraso,
@@ -641,9 +645,10 @@ def _process_madrid_train(scheduled: dict, live: dict | None, today: date, now_l
 
     cod_est_ant = live.get("codEstAnt", "")
     ult_retraso = int(live.get("ultRetraso", 0) or 0)
-    ult_retraso = _sanitize_retraso(
+    ult_retraso, retraso_anomalo_alertado = _sanitize_retraso(
         cod, scheduled["sentido"], ult_retraso, scheduled["hora_llegada_destino"], today, now_local, log_extra,
         scheduled.get("offset_dias_llegada", 0),
+        ya_alertado=bool(state and state.get("retraso_anomalo_alertado")),
     )
     latitud = _to_decimal(live.get("latitud"))
     longitud = _to_decimal(live.get("longitud"))
@@ -701,6 +706,7 @@ def _process_madrid_train(scheduled: dict, live: dict | None, today: date, now_l
         hora_paso_zamora=hora_paso_zamora,
         latitud=latitud,
         longitud=longitud,
+        retraso_anomalo_alertado=retraso_anomalo_alertado,
     )
     logger.info(
         "Tren %s (Madrid) aún en ruta (última est: %s, retraso: %d min)",
@@ -746,8 +752,17 @@ def _end_of_day_ttl(today: date) -> int:
 def _update_state(cod: str, scheduled: dict, retraso: int, today: date,
                   now_local: datetime, capturado_en_zamora: bool = False,
                   hora_paso_zamora: str | None = None,
-                  latitud: str | None = None, longitud: str | None = None):
-    """Persiste el estado transitorio del tren en DynamoDB (pk indexado por `today`, el día operativo)."""
+                  latitud: str | None = None, longitud: str | None = None,
+                  retraso_anomalo_alertado: bool = False):
+    """
+    Persiste el estado transitorio del tren en DynamoDB (pk indexado por
+    `today`, el día operativo).
+
+    put_item reemplaza el item entero, así que `retraso_anomalo_alertado`
+    (una vez True) debe reenviarse en cada ciclo mientras el tren siga sin
+    'entregado' — si no, se perdería en el siguiente put_item y
+    _sanitize_retraso volvería a alertar por email en el ciclo siguiente.
+    """
     ttl = _end_of_day_ttl(today)
 
     h, m = map(int, scheduled["hora_llegada_destino"].split(":"))
@@ -777,6 +792,8 @@ def _update_state(cod: str, scheduled: dict, retraso: int, today: date,
         item["latitud"] = latitud
     if longitud is not None:
         item["longitud"] = longitud
+    if retraso_anomalo_alertado:
+        item["retraso_anomalo_alertado"] = True
 
     state_table.put_item(Item=item)
 
@@ -888,23 +905,32 @@ def _maybe_publish_delay_alert(scheduled: dict, ult_retraso: int,
 
 def _sanitize_retraso(cod: str, sentido: str, ult_retraso: int, hora_referencia: str,
                        today: date, now_local: datetime, log_extra: dict,
-                       offset_dias_referencia: int = 0) -> int:
+                       offset_dias_referencia: int = 0, ya_alertado: bool = False) -> tuple[int, bool]:
     """
     Renfe ha reportado alguna vez un ultRetraso disparatado (p. ej. -562 min
     en flotaLD.json) — un fallo puntual de su servicio, no un tren circulando
     con adelanto real. Si el retraso cae por debajo de
     NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES no es fiable: se recalcula
     comparando la hora programada de referencia (hora_llegada_destino) con la
-    hora actual, y se avisa por email para poder revisarlo. La corrección se
-    propaga automáticamente a hora_llegada_corregida/hora_paso_zamora, que se
-    calculan a partir de este mismo valor. `today` (día operativo) ancla esa
-    hora programada vía _schedule_datetime — imprescindible en el tramo de
-    madrugada, donde now_local ya está en el día calendario siguiente — y
+    hora actual. La corrección se propaga automáticamente a
+    hora_llegada_corregida/hora_paso_zamora, que se calculan a partir de este
+    mismo valor. `today` (día operativo) ancla esa hora programada vía
+    _schedule_datetime — imprescindible en el tramo de madrugada, donde
+    now_local ya está en el día calendario siguiente — y
     offset_dias_referencia la sitúa en el día correcto si el tren cruza la
     medianoche.
+
+    Mientras el tren no se marca 'entregado' se reevalúa en cada ciclo de 5
+    min, y el mismo bug de Renfe suele persistir varios ciclos seguidos: sin
+    `ya_alertado` esto mandaría un email por ciclo (docenas al día). El
+    llamador debe pasar el valor ya persistido en DynamoDB
+    (`retraso_anomalo_alertado`) y volver a guardar el booleano devuelto, de
+    forma que el aviso por email solo se publique la primera vez que se
+    detecta la anomalía para ese tren+día; el resto del día se sigue
+    corrigiendo el valor igual, solo se omite el email repetido.
     """
     if ult_retraso >= NEGATIVE_DELAY_ANOMALY_THRESHOLD_MINUTES:
-        return ult_retraso
+        return ult_retraso, ya_alertado
 
     hora_programada = _schedule_datetime(
         today, hora_referencia, now_local.tzinfo, offset_dias_referencia
@@ -918,8 +944,9 @@ def _sanitize_retraso(cod: str, sentido: str, ult_retraso: int, hora_referencia:
         retraso_corregido, now_local.strftime("%H:%M"), hora_referencia,
         extra=log_extra,
     )
-    _publish_negative_delay_alert(cod, sentido, ult_retraso, retraso_corregido, now_local, log_extra)
-    return retraso_corregido
+    if not ya_alertado:
+        _publish_negative_delay_alert(cod, sentido, ult_retraso, retraso_corregido, now_local, log_extra)
+    return retraso_corregido, True
 
 
 def _publish_negative_delay_alert(cod: str, sentido: str, ult_retraso_original: int,
