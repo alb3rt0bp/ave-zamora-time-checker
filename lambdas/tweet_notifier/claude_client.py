@@ -85,13 +85,47 @@ Hashtags: elige entre 2 y 4, variando entre tuits. Incluye SIEMPRE al \
 menos uno de este grupo reivindicativo: {', '.join(ADVOCACY_HASHTAGS)}. Completa con \
 hashtags genéricos según encaje: {', '.join(GENERIC_HASHTAGS)}
 
-Si el mensaje del usuario incluye una lista de tendencias actuales en X, \
-añade una de esos hastags tendencia, pero escogiendo el que mejor puede encajar de forma \
-natural con el mensaje — nunca en sustitución del hashtag reivindicativo \
-obligatorio, pero siempre incluir un hashtag tendencia. Si no se incluye ninguna lista,\
-no fuerces nada. No es obligatorio usar un hashtag tendencia, no buscamos que se nos acuse de oportunistas o spam
+## Pautas para la elección de hashtags
+Si el mensaje del usuario incluye una lista de tendencias actuales en X, añade como hashtag adicional \
+como MUCHO una tendencia — nunca en sustitución del hashtag reivindicativo obligatorio.
 
-Cálculo EXACTO del límite de 280 caracteres — LÍMITE DURO, no orientativo, se descarta cualquier \
+Al seleccionar hashtags para un post, sigue este criterio de forma estricta:
+
+### 1. Relevancia temática obligatoria
+Un hashtag solo es válido si cumple AL MENOS una de estas condiciones:
+- Es propio de la causa/marca (ej. hashtags de campaña definidos en el contexto)
+- Es un término genérico de la temática general (ej. sector, industria, tipo de contenido)
+- Es un trending topic **cuyo contenido real** (no solo el nombre) se relaciona con el tema del post
+
+**Nunca** uses un hashtag trending solo porque tiene volumen alto, si no tiene relación temática real con el contenido del post.
+
+### 2. Verificación antes de recomendar un trending topic
+Antes de sugerir un hashtag que esté en tendencia:
+- Identifica de qué trata realmente (programa de TV, evento deportivo, serie, noticia, día genérico de la semana, etc.)
+- Si no puedes determinar el origen o contexto del hashtag con confianza, indícalo explícitamente en vez de asumir que es aprovechable
+- Si el trending pertenece a contenido de entretenimiento (reality, serie, docu-reality, programa de TV con audiencia no relacionada), descártalo salvo que el post haga referencia explícita y legítima a ese contenido
+
+### 3. Días genéricos como opción segura por defecto
+Los hashtags de "día de la semana" genéricos (#FelizLunes, #FelizMartes, etc.) son válidos como opción de bajo riesgo cuando:
+- No hay ningún trending topic temáticamente alineado disponible
+- Se usan como complemento, no como sustituto de los hashtags propios de la causa
+
+### 4. Límite de cantidad
+- Recomienda un máximo de 2-4 hashtags por post
+- Prioriza 1 hashtag propio de marca/campaña + 1-2 hashtags de alcance (genéricos o trending relevantes)
+- Nunca satures un post con 5+ hashtags: reduce alcance orgánico y aparenta spam
+
+### 5. Transparencia sobre limitaciones de datos
+Si no tienes acceso a datos de tendencias en tiempo real fiables (o las fuentes disponibles son contradictorias o de fecha incierta):
+- Indícalo explícitamente al usuario
+- No presentes datos de tendencias como definitivos si provienen de fuentes de scraping de terceros no oficiales
+- Sugiere al usuario verificar directamente en la app de X cuando la precisión al minuto sea crítica
+
+### 6. Nunca recomendar por inercia
+No repitas automáticamente los mismos hashtags de publicaciones anteriores solo por comodidad. Evalúa cada post de forma independiente: el contexto, la actualidad y los trending topics cambian a diario.
+
+## Cálculo EXACTO del límite de 280 caracteres 
+LÍMITE DURO, no orientativo, se descarta cualquier \
 respuesta que lo supere: al publicarse, el tuit final se compone como `tweet_text` + dos saltos de \
 línea (2 caracteres) + los elementos de `hashtags` unidos por un espacio simple. Es decir:
 

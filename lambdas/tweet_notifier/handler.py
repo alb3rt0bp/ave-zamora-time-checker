@@ -53,6 +53,11 @@ def lambda_handler(event, context):
             continue
 
         if claude_client.tweet_length(drafted["tweet_text"], drafted["hashtags"]) > 280:
+            text = f"{drafted['tweet_text']}\n\n{' '.join(drafted['hashtags'])}"
+            logger.warning(
+                "Tuit para %s supera los 280 caracteres: (%d); no se publica. Texto: %s",
+                cod_comercial, len(text), text, extra=log_extra
+            )
             try:
                 drafted = claude_client.refine_tweet(alert, drafted, log_extra)
             except Exception as exc:
@@ -61,8 +66,8 @@ def lambda_handler(event, context):
         text = f"{drafted['tweet_text']}\n\n{' '.join(drafted['hashtags'])}"
         if len(text) > 280:
             logger.warning(
-                "Tuit para %s sigue superando los 280 caracteres tras refinar (%d); no se publica",
-                cod_comercial, len(text), extra=log_extra
+                "Tuit para %s sigue superando los 280 caracteres tras refinar (%d); no se publica. Texto: %s",
+                cod_comercial, len(text), text, extra=log_extra
             )
             continue
 

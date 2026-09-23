@@ -101,7 +101,10 @@ class TestLambdaHandler(unittest.TestCase):
             result = self.module.lambda_handler(_sns_event(ALERT_PAYLOAD), FakeContext())
 
         self.assertEqual(result, {"statusCode": 200, "published": 0})
-        self.assertTrue(any("sigue superando los 280 caracteres" in message for message in logs.output))
+        self.assertTrue(any(
+            "sigue superando los 280 caracteres" in message and long_text in message
+            for message in logs.output
+        ))
         mock_urlopen.assert_not_called()
 
     def test_warns_and_skips_publishing_when_refine_itself_fails(self):
