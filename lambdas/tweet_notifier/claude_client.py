@@ -28,7 +28,7 @@ CLAUDE_MODEL_ID = os.environ.get("CLAUDE_MODEL_ID", "global.anthropic.claude-son
 DELAY_ALERT_THRESHOLD_MINUTES = int(os.environ.get("DELAY_ALERT_THRESHOLD_MINUTES", "15"))
 TRENDS_ENABLED = os.environ.get("TRENDS_ENABLED", "true").lower() == "true"
 ANTHROPIC_VERSION = "bedrock-2023-05-31"
-MAX_TWEET_LENGTH = 280
+MAX_TWEET_LENGTH = 350
 
 bedrock_runtime = boto3.client("bedrock-runtime")
 

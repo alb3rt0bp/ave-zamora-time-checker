@@ -7,7 +7,7 @@ entregado con más de DELAY_ALERT_THRESHOLD_MINUTES minutos de retraso (o es
 el tren madrugador de Madrid, que siempre genera alerta), redacta un tuit
 para la Asociación de Usuarios de Trenes AVE de Zamora vía Claude
 (claude_client.draft_tweet) y lo publica en X (x_client.XClient.post_tweet).
-Si el tuit redactado supera los 280 caracteres, se pide a Claude que lo
+Si el tuit redactado supera el límite de caracteres (claude_client.MAX_TWEET_LENGTH), se pide a Claude que lo
 acorte (claude_client.refine_tweet); si tras el reintento sigue superando
 el límite, se registra un aviso y ese tuit en concreto no se publica —
 el resto del lote sigue su curso.
@@ -52,11 +52,11 @@ def lambda_handler(event, context):
             logger.error("Error redactando tuit para %s: %s", cod_comercial, exc, extra=log_extra)
             continue
 
-        if claude_client.tweet_length(drafted["tweet_text"], drafted["hashtags"]) > 280:
+        if claude_client.tweet_length(drafted["tweet_text"], drafted["hashtags"]) > claude_client.MAX_TWEET_LENGTH:
             text = f"{drafted['tweet_text']}\n\n{' '.join(drafted['hashtags'])}"
             logger.warning(
-                "Tuit para %s supera los 280 caracteres: (%d); no se publica. Texto: %s",
-                cod_comercial, len(text), text, extra=log_extra
+                "Tuit para %s supera los %d caracteres: (%d); no se publica. Texto: %s",
+                cod_comercial, claude_client.MAX_TWEET_LENGTH, len(text), text, extra=log_extra
             )
             try:
                 drafted = claude_client.refine_tweet(alert, drafted, log_extra)
@@ -64,10 +64,10 @@ def lambda_handler(event, context):
                 logger.error("Error refinando tuit para %s: %s", cod_comercial, exc, extra=log_extra)
 
         text = f"{drafted['tweet_text']}\n\n{' '.join(drafted['hashtags'])}"
-        if len(text) > 280:
+        if len(text) > claude_client.MAX_TWEET_LENGTH:
             logger.warning(
-                "Tuit para %s sigue superando los 280 caracteres tras refinar (%d); no se publica. Texto: %s",
-                cod_comercial, len(text), text, extra=log_extra
+                "Tuit para %s sigue superando los %d caracteres tras refinar (%d); no se publica. Texto: %s",
+                cod_comercial, claude_client.MAX_TWEET_LENGTH, len(text), text, extra=log_extra
             )
             continue
 

@@ -229,3 +229,6 @@ CLAUDE.md
 config/train_schedules.json
 tests/reports
 lambdas/train_tracker/train_schedules.json
+
+# Graphify
+graphify-out

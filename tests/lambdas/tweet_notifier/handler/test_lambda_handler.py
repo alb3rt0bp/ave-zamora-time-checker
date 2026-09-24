@@ -71,8 +71,8 @@ class TestLambdaHandler(unittest.TestCase):
         self.assertEqual(result, {"statusCode": 200, "published": 1})
         self.assertEqual(mock_draft.call_count, 2)
 
-    def test_refines_and_publishes_tweet_that_first_exceeds_280_characters(self):
-        long_text = "x" * 275
+    def test_refines_and_publishes_tweet_that_first_exceeds_350_characters(self):
+        long_text = "x" * 345
         short_text = "texto corto"
         with patch.object(
             claude_client, "draft_tweet",
@@ -89,8 +89,8 @@ class TestLambdaHandler(unittest.TestCase):
         sent_body = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
         self.assertIn(short_text, sent_body["text"])
 
-    def test_warns_and_skips_publishing_when_still_over_280_after_refining(self):
-        long_text = "x" * 275
+    def test_warns_and_skips_publishing_when_still_over_350_after_refining(self):
+        long_text = "x" * 345
         with self.assertLogs("tweet_notifier", level="WARNING") as logs, patch.object(
             claude_client, "draft_tweet",
             return_value={"tweet_text": long_text, "hashtags": ["#ZamoraNecesitaTren"]},
@@ -102,13 +102,13 @@ class TestLambdaHandler(unittest.TestCase):
 
         self.assertEqual(result, {"statusCode": 200, "published": 0})
         self.assertTrue(any(
-            "sigue superando los 280 caracteres" in message and long_text in message
+            "sigue superando los 350 caracteres" in message and long_text in message
             for message in logs.output
         ))
         mock_urlopen.assert_not_called()
 
     def test_warns_and_skips_publishing_when_refine_itself_fails(self):
-        long_text = "x" * 275
+        long_text = "x" * 345
         with self.assertLogs("tweet_notifier", level="WARNING") as logs, patch.object(
             claude_client, "draft_tweet",
             return_value={"tweet_text": long_text, "hashtags": ["#ZamoraNecesitaTren"]},
@@ -119,10 +119,10 @@ class TestLambdaHandler(unittest.TestCase):
             result = self.module.lambda_handler(_sns_event(ALERT_PAYLOAD), FakeContext())
 
         self.assertEqual(result, {"statusCode": 200, "published": 0})
-        self.assertTrue(any("sigue superando los 280 caracteres" in message for message in logs.output))
+        self.assertTrue(any("sigue superando los 350 caracteres" in message for message in logs.output))
         mock_urlopen.assert_not_called()
 
-    def test_does_not_refine_tweet_within_280_characters(self):
+    def test_does_not_refine_tweet_within_350_characters(self):
         with patch.object(
             claude_client, "draft_tweet",
             return_value={"tweet_text": "texto", "hashtags": ["#ZamoraNecesitaTren"]},
