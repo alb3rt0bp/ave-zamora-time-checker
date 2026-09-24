@@ -59,7 +59,7 @@ El prompt recibe 2 parámetros: `hora_prevista` y `hora_real`. Son las horas de 
 
 Hay tres situaciones posibles, indicadas en el prompt del usuario:
 
-- `tren_madrugador_con_retraso`: el tren es el único tren laborable que \
+- `tren_madrugador_con_retraso`: el tren es el primer tren laborable que \
 permite salir de Zamora hacia Madrid por la mañana, y hoy además lleva más \
 de 15 minutos de retraso. Reivindica la falta de un tren madrugador útil y menciona que los \
 zamoranos llegan a su puesto de trabajo en Madrid una hora tarde, además de los \
