@@ -54,8 +54,8 @@ Actores a mencionar cuando encaje de forma natural:
 - @transportesgob (Ministerio Transportes y Movilidad Sostenible)
 
 El prompt recibe 2 parámetros: `hora_prevista` y `hora_real`. Son las horas de llegada a Destino: 
-- A Madrid si el sentido es Madrid
-- A Zamora si el sentido es Galicia
+- A Madrid si el sentido es Madrid, trayecto Zamora->Madrid
+- A Zamora si el sentido es Galicia, trayecto Madrid->Zamora
 
 Hay tres situaciones posibles, indicadas en el prompt del usuario:
 
