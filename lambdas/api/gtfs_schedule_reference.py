@@ -5,14 +5,29 @@ horario de REFERENCIA que sirve /trains/schedule: qué días de la semana
 circula cada tren y a qué hora — el mismo shape que devuelve
 handler._build_train_schedule_index(config/train_schedules.json).
 
-A diferencia de lambdas/train_tracker/gtfs_schedule_builder.py
-(build_todays_trains), que resuelve los trenes activos en UNA fecha
-concreta aplicando las excepciones puntuales de calendar_dates.txt, este
-módulo deriva el patrón SEMANAL típico de cada tren a partir únicamente del
-patrón de calendar.txt vigente en reference_date — ignorando a propósito
-calendar_dates.txt: sus excepciones son ajustes puntuales para un día
-concreto (festivos, refuerzos), no reflejan qué días circula un tren
-"normalmente", que es lo que esta pantalla de referencia quiere mostrar.
+Este módulo SÍ necesita calendar_dates.txt para resolver el patrón semanal
+real — a diferencia de lo que decía una versión anterior de este docstring.
+Verificado contra el feed real de Renfe (2026-09): `service_id` es en la
+práctica un intervalo de validez de ~3-4 semanas codificado en su propio
+nombre (p. ej. `2026-09-232026-10-14045051` = vigente 2026-09-23..10-14 para
+el trip_short_name 045051), y dentro de ese intervalo `calendar.txt` casi
+siempre marca el servicio activo TODOS los días de la semana — un valor
+señuelo. El patrón real (p. ej. "circula solo los domingos") vive entero en
+`calendar_dates.txt`, que dentro de ese mismo intervalo va retirando
+(`exception_type=2`) casi todas las fechas y deja activas únicamente las que
+el tren circula de verdad. Ignorar calendar_dates.txt (como hacía la versión
+anterior) hace que CUALQUIER servicio con este patrón — que resultó ser
+prácticamente todos — se resuelva como "circula los 7 días de la semana".
+
+Por eso `_parse_calendar_weekdays` expande día a día el intervalo
+start_date..end_date de la fila de calendar.txt vigente en reference_date
+(aplicando su patrón semanal como valor por defecto) y superpone encima las
+excepciones de calendar_dates.txt de ese mismo service_id, exactamente igual
+que build_todays_trains hace para una fecha concreta — pero acumulando el
+conjunto de weekdays resultantes en vez de una única fecha. El intervalo de
+cada service_id observado en el feed real es corto (semanas, no meses), así
+que este bucle día a día es barato incluso sumado sobre todos los trenes que
+pasan por Zamora.
 
 Se duplican aquí (en vez de importarse de gtfs_schedule_builder.py) los
 mismos helpers de parseo de CSV, porque cada Lambda de este proyecto empaqueta
@@ -26,7 +41,7 @@ import csv
 import io
 import logging
 import os
-from datetime import date
+from datetime import date, datetime, timedelta
 
 logger = logging.getLogger(f"api.{__name__}")
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -34,6 +49,9 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 _CALENDAR_WEEKDAY_COLUMNS = (
     "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
 )
+
+_ADDED = "1"
+_REMOVED = "2"
 
 
 def _read_csv_rows(csv_text: str):
@@ -56,9 +74,9 @@ def build_schedule_reference(
 ) -> list[dict]:
     """
     gtfs_files: dict {nombre_fichero: contenido_texto}, igual que devuelve
-    GtfsClient.download_and_extract() (aquí solo hacen falta trips.txt,
-    stop_times.txt y calendar.txt — calendar_dates.txt no se usa, ver
-    docstring del módulo).
+    GtfsClient.download_and_extract() (necesita trips.txt, stop_times.txt,
+    calendar.txt Y calendar_dates.txt — ver docstring del módulo sobre por
+    qué esta última ya no es opcional).
 
     Devuelve una lista de dicts {cod_comercial, sentido, hora_salida,
     hora_llegada_destino, weekdays}, ordenada por cod_comercial — mismo
@@ -73,7 +91,9 @@ def build_schedule_reference(
     trips = _index_trips(gtfs_files["trips.txt"], candidate_trip_ids, log_extra)
 
     service_ids = {info["service_id"] for info in trips.values()}
-    weekdays_by_service = _parse_calendar_weekdays(gtfs_files["calendar.txt"], service_ids, reference_date)
+    weekdays_by_service = _parse_calendar_weekdays(
+        gtfs_files["calendar.txt"], gtfs_files["calendar_dates.txt"], service_ids, reference_date
+    )
 
     entries: dict[tuple, dict] = {}
     for trip_id, trip_info in trips.items():
@@ -162,18 +182,27 @@ def _index_trips(trips_csv: str, candidate_trip_ids: set, log_extra: dict) -> di
 
 
 def _parse_calendar_weekdays(
-    calendar_csv: str, service_ids: set, reference_date: date
+    calendar_csv: str, calendar_dates_csv: str, service_ids: set, reference_date: date
 ) -> dict[str, list[int]]:
     """
     Para cada service_id de interés vigente en reference_date (start_date <=
-    reference_date <= end_date), devuelve la lista de weekdays (0=lunes..
-    6=domingo) en los que circula según su patrón semanal — sin mirar
-    calendar_dates.txt, ver docstring del módulo. Un service_id sin fila
-    vigente (superada o aún no vigente) o sin ningún día activo queda fuera.
+    reference_date <= end_date), expande día a día su intervalo
+    start_date..end_date — aplicando el patrón semanal de calendar.txt como
+    valor por defecto y las excepciones de calendar_dates.txt de ese mismo
+    service_id por encima (idéntico criterio que
+    gtfs_schedule_builder._is_service_active, pero para cada fecha del
+    intervalo en vez de una sola) — y devuelve el conjunto de weekdays
+    (0=lunes..6=domingo) en los que el servicio queda realmente activo.
+
+    Necesario porque en el feed real de Renfe calendar.txt marca casi todos
+    los servicios activos los 7 días de la semana (ver docstring del
+    módulo): el patrón real solo emerge tras aplicar calendar_dates.txt. Un
+    service_id sin fila vigente, o cuyas fechas activas no caen en ningún
+    día de la semana (no debería ocurrir, pero no se asume), queda fuera.
     """
     target_str = reference_date.strftime("%Y%m%d")
 
-    weekdays_by_service: dict[str, list[int]] = {}
+    valid_rows: dict[str, dict] = {}
     for row in _read_csv_rows(calendar_csv):
         service_id = row.get("service_id", "")
         if service_id not in service_ids:
@@ -184,9 +213,41 @@ def _parse_calendar_weekdays(
         if not (start_date <= target_str <= end_date):
             continue
 
-        active = [i for i, col in enumerate(_CALENDAR_WEEKDAY_COLUMNS) if row.get(col, "0") == "1"]
-        if active:
-            weekdays_by_service[service_id] = active
+        valid_rows[service_id] = row
+
+    if not valid_rows:
+        return {}
+
+    exceptions_by_service: dict[str, dict[str, str]] = {service_id: {} for service_id in valid_rows}
+    for row in _read_csv_rows(calendar_dates_csv):
+        service_id = row.get("service_id", "")
+        if service_id not in exceptions_by_service:
+            continue
+        exceptions_by_service[service_id][row.get("date", "")] = row.get("exception_type", "")
+
+    weekdays_by_service: dict[str, list[int]] = {}
+    for service_id, row in valid_rows.items():
+        start = datetime.strptime(row["start_date"], "%Y%m%d").date()
+        end = datetime.strptime(row["end_date"], "%Y%m%d").date()
+        exceptions = exceptions_by_service[service_id]
+
+        active_weekdays = set()
+        current = start
+        while current <= end:
+            exception_type = exceptions.get(current.strftime("%Y%m%d"))
+            if exception_type == _REMOVED:
+                active = False
+            elif exception_type == _ADDED:
+                active = True
+            else:
+                active = row.get(_CALENDAR_WEEKDAY_COLUMNS[current.weekday()], "0") == "1"
+
+            if active:
+                active_weekdays.add(current.weekday())
+            current += timedelta(days=1)
+
+        if active_weekdays:
+            weekdays_by_service[service_id] = sorted(active_weekdays)
 
     return weekdays_by_service
 
