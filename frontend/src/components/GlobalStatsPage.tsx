@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { fetchGlobalMetrics, fetchTrainSchedule } from "../api";
 import type { GlobalMetrics, TrainSchedule } from "../types";
+import { SPONSOR_BOTTOM, SPONSOR_TOP } from "../config/sponsorBanners";
 import { useFetch } from "../hooks/useFetch";
 import { formatFranjaHoraria, formatSpanishDate, formatWeekday } from "../utils/metricsFormat";
 import { DonutChart } from "./DonutChart";
+import { SponsorBanner } from "./SponsorBanner";
 import { TrainStatsModal } from "./TrainStatsModal";
 
 interface PageData {
@@ -26,6 +28,7 @@ export function GlobalStatsPage() {
         <h1 className="app-title">Estadísticas · Global</h1>
       </header>
       <main className="app-main">
+        <SponsorBanner slot="top" sponsor={SPONSOR_TOP} />
         {state.status === "loading" && (
           <div className="state-card">
             <span className="spinner" aria-hidden="true" />
@@ -41,6 +44,7 @@ export function GlobalStatsPage() {
           </p>
         )}
         {state.status === "ok" && <GlobalStatsContent global={state.data.global} onSelectTrain={setOpenTrainCode} />}
+        <SponsorBanner slot="bottom" sponsor={SPONSOR_BOTTOM} />
       </main>
       {openTrainCode && state.status === "ok" && (
         <TrainStatsModal

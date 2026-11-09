@@ -3,7 +3,9 @@ import { ChevronLeftIcon, ChevronRightIcon } from "./icons";
 import { Clock } from "./Clock";
 import { DatePicker } from "./DatePicker";
 import { DayView } from "./DayView";
+import { SponsorBanner } from "./SponsorBanner";
 import { TodayView } from "./TodayView";
+import { SPONSOR_BOTTOM, SPONSOR_TOP } from "../config/sponsorBanners";
 import { useRenfeFlota } from "../hooks/useRenfeFlota";
 import { useTrainSchedule } from "../hooks/useTrainSchedule";
 import { useTrainStats } from "../hooks/useTrainStats";
@@ -62,6 +64,9 @@ export function TrenTrackingSection() {
         </div>
       </header>
       <main className="app-main">
+        {/* En móvil la tabla en tiempo real va primero: sin banner encima,
+            solo el de abajo. En días pasados y en escritorio, ambos. */}
+        <SponsorBanner slot="top" sponsor={SPONSOR_TOP} hideOnMobile={selectedDate === ""} />
         {selectedDate ? (
           <DayView date={selectedDate} schedule={schedule} metrics={metrics} globalMetrics={globalMetrics} />
         ) : (
@@ -72,6 +77,7 @@ export function TrenTrackingSection() {
             globalMetrics={globalMetrics}
           />
         )}
+        <SponsorBanner slot="bottom" sponsor={SPONSOR_BOTTOM} />
       </main>
     </>
   );

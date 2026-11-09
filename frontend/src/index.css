@@ -477,6 +477,51 @@ input {
   overflow: hidden;
 }
 
+/* Banner de patrocinio directo, del mismo ancho que el contenido de la
+   página. El placeholder usa un borde discontinuo para leerse como un
+   hueco reservado, no como un componente roto, mientras no hay un
+   patrocinador real que mostrar (ver config/sponsorBanners.ts). */
+.sponsor-banner {
+  display: block;
+  text-decoration: none;
+}
+
+.sponsor-banner--top {
+  margin-bottom: 16px;
+}
+
+.sponsor-banner--bottom {
+  margin-top: 16px;
+}
+
+.sponsor-banner__image {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: inherit;
+}
+
+.sponsor-banner__pixel {
+  position: absolute;
+  visibility: hidden;
+}
+
+.sponsor-banner--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 90px;
+  padding: 16px 24px;
+  border: 1px dashed var(--border-hairline);
+  text-align: center;
+}
+
+.sponsor-banner__placeholder-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;

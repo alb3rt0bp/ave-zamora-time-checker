@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { fetchGlobalMetrics, fetchTrainMetrics, fetchTrainSchedule, NotFoundError } from "../api";
 import type { GlobalMetrics, TrainMetrics, TrainSchedule } from "../types";
+import { SPONSOR_BOTTOM, SPONSOR_TOP } from "../config/sponsorBanners";
 import { useFetch } from "../hooks/useFetch";
 import { WEEKDAY_GROUPS, groupByWeekdayGroup } from "../utils/weekdayGroups";
+import { SponsorBanner } from "./SponsorBanner";
 import { TrainStatsModal } from "./TrainStatsModal";
 
 interface PageData {
@@ -36,6 +38,7 @@ export function PorTrenesPage() {
         <h1 className="app-title">Estadísticas · Por trenes</h1>
       </header>
       <main className="app-main">
+        <SponsorBanner slot="top" sponsor={SPONSOR_TOP} />
         {state.status === "loading" && (
           <div className="state-card">
             <span className="spinner" aria-hidden="true" />
@@ -55,6 +58,7 @@ export function PorTrenesPage() {
             onSelectTrain={setOpenTrainCode}
           />
         )}
+        <SponsorBanner slot="bottom" sponsor={SPONSOR_BOTTOM} />
       </main>
       {openTrainCode && state.status === "ok" && (
         <TrainStatsModal

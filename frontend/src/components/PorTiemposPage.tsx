@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { fetchMonthMetrics, fetchWeekMetrics } from "../api";
 import type { DelayBuckets, MonthMetrics, WeekMetrics } from "../types";
+import { SPONSOR_BOTTOM, SPONSOR_TOP } from "../config/sponsorBanners";
 import { useFetch } from "../hooks/useFetch";
 import { formatMonthName, formatShortDate } from "../utils/metricsFormat";
 import { DonutChart } from "./DonutChart";
+import { SponsorBanner } from "./SponsorBanner";
 
 type Mode = "semanas" | "meses";
 
@@ -63,6 +65,7 @@ export function PorTiemposPage() {
         </div>
       </header>
       <main className="app-main">
+        <SponsorBanner slot="top" sponsor={SPONSOR_TOP} />
         {state.status === "loading" && (
           <div className="state-card">
             <span className="spinner" aria-hidden="true" />
@@ -92,6 +95,7 @@ export function PorTiemposPage() {
             emptyMessage="Todavía no hay datos de ningún mes."
           />
         )}
+        <SponsorBanner slot="bottom" sponsor={SPONSOR_BOTTOM} />
       </main>
     </>
   );

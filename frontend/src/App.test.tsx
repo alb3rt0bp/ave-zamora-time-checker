@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { server } from "./mocks/server";
 import { addDaysIso, yesterdayMadrid } from "./utils/dateLimits";
 import App from "./App";
@@ -253,5 +253,62 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Seguimiento de trenes" }));
     expect(await screen.findByText(/no hay trenes/i)).toBeInTheDocument();
+  });
+
+  describe("sponsor banners on mobile", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    function emulateMobile() {
+      vi.spyOn(window, "matchMedia").mockImplementation(
+        (query: string) =>
+          ({
+            matches: query.includes("max-width"),
+            media: query,
+            addEventListener: () => {},
+            removeEventListener: () => {},
+          }) as unknown as MediaQueryList,
+      );
+    }
+
+    const sponsorLinks = () => screen.queryAllByRole("link", { name: /^Patrocinador/ });
+
+    it("shows only the bottom banner on today's live table", async () => {
+      emulateMobile();
+      server.use(http.get(`${API_BASE_URL}/trains/today`, () => HttpResponse.json([])));
+
+      render(<App />);
+      await screen.findByText(/no hay trenes/i);
+
+      expect(sponsorLinks()).toHaveLength(1);
+    });
+
+    it("shows both banners on a past day's table", async () => {
+      emulateMobile();
+      server.use(
+        http.get(`${API_BASE_URL}/trains/today`, () => HttpResponse.json([])),
+        http.get(`${API_BASE_URL}/trains/:date`, () => HttpResponse.json([])),
+      );
+      const user = userEvent.setup();
+
+      render(<App />);
+      await screen.findByText(/no hay trenes/i);
+      await user.click(screen.getByRole("button", { name: "Día ant." }));
+      await screen.findByText(/no hay trenes/i);
+
+      expect(sponsorLinks()).toHaveLength(2);
+    });
+
+    it("shows both banners on the other screens", async () => {
+      emulateMobile();
+      server.use(http.get(`${API_BASE_URL}/trains/today`, () => HttpResponse.json([])));
+      const user = userEvent.setup();
+
+      render(<App />);
+      await screen.findByText(/no hay trenes/i);
+      await user.click(screen.getByRole("button", { name: "Horarios de trenes AVE" }));
+      await screen.findByRole("heading", { name: "Horarios de trenes AVE" });
+
+      expect(sponsorLinks()).toHaveLength(2);
+    });
   });
 });
