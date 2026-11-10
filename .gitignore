@@ -232,3 +232,5 @@ lambdas/train_tracker/train_schedules.json
 
 # Graphify
 graphify-out
+
+node_modules
